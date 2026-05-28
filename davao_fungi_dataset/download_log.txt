@@ -26,3 +26,66 @@ NEXT STEPS:
 2026-05-28 00:47:10,214  INFO       edible / poisonous / unknown
 2026-05-28 00:47:10,214  INFO    3. Use the labeled CSV + images folder to train your model
 2026-05-28 00:47:10,214  INFO  ============================================================
+2026-05-28 09:58:19,324  INFO  ============================================================
+2026-05-28 09:58:19,325  INFO  iNaturalist Davao City Fungi Downloader
+2026-05-28 09:58:19,325  INFO  Place ID : 29052  |  Taxon ID : 47170
+2026-05-28 09:58:19,325  INFO  ============================================================
+2026-05-28 09:58:19,330  INFO  RESUME MODE: Found 27 existing images - skipping already downloaded files
+2026-05-28 09:58:19,330  INFO  
+2026-05-28 09:58:19,330  INFO  [1/3] Fetching observations from iNaturalist API...
+2026-05-28 09:58:19,330  INFO    Fetching page 1...
+2026-05-28 09:58:26,138  INFO    Total research-grade fungi observations in Davao City: 18
+2026-05-28 09:58:26,139  INFO    Collected 18/18 observations
+2026-05-28 09:58:26,139  INFO    Total observations fetched: 18
+2026-05-28 09:58:26,139  INFO  
+2026-05-28 09:58:26,139  INFO  [2/3] Downloading images...
+2026-05-28 09:58:26,140  INFO    [1/18] Skipped (exists): Coprinellus disseminatus | obs 264526536 photo 1
+2026-05-28 09:58:26,140  INFO    [2/18] Skipped (exists): Coprinellus disseminatus | obs 263206825 photo 1
+2026-05-28 09:58:26,140  INFO    [2/18] Skipped (exists): Coprinellus disseminatus | obs 263206825 photo 2
+2026-05-28 09:58:26,141  INFO    [3/18] Skipped (exists): Psilocybe cubensis | obs 256189691 photo 1
+2026-05-28 09:58:26,142  INFO    [4/18] Skipped (exists): Trametes villosa | obs 236773556 photo 1
+2026-05-28 09:58:26,142  INFO    [4/18] Skipped (exists): Trametes villosa | obs 236773556 photo 2
+2026-05-28 09:58:26,142  INFO    [4/18] Skipped (exists): Trametes villosa | obs 236773556 photo 3
+2026-05-28 09:58:26,143  INFO    [5/18] Skipped (exists): Herpothallon rubrocinctum | obs 201164582 photo 1
+2026-05-28 09:58:26,143  INFO    [6/18] Skipped (exists): Herpothallon rubrocinctum | obs 200930926 photo 1
+2026-05-28 09:58:26,144  INFO    [7/18] Skipped (exists): Herpothallon rubrocinctum | obs 200930908 photo 1
+2026-05-28 09:58:26,145  INFO    [8/18] Skipped (exists): Herpothallon rubrocinctum | obs 200919993 photo 1
+2026-05-28 09:58:26,145  INFO    [9/18] Skipped (exists): Heimiomyces tenuipes | obs 154024496 photo 1
+2026-05-28 09:58:26,146  INFO    [10/18] Skipped (exists): Phlebopus beniensis | obs 95869713 photo 1
+2026-05-28 09:58:26,146  INFO    [10/18] Skipped (exists): Phlebopus beniensis | obs 95869713 photo 2
+2026-05-28 09:58:26,147  INFO    [10/18] Skipped (exists): Phlebopus beniensis | obs 95869713 photo 3
+2026-05-28 09:58:26,147  INFO    [11/18] Skipped (exists): Phlebopus beniensis | obs 82418840 photo 1
+2026-05-28 09:58:26,148  INFO    [11/18] Skipped (exists): Phlebopus beniensis | obs 82418840 photo 2
+2026-05-28 09:58:26,148  INFO    [11/18] Skipped (exists): Phlebopus beniensis | obs 82418840 photo 3
+2026-05-28 09:58:26,149  INFO    [12/18] Skipped (exists): Herpothallon rubrocinctum | obs 37216237 photo 1
+2026-05-28 09:58:26,149  INFO    [13/18] Skipped (exists): Clathrus natalensis | obs 34814814 photo 1
+2026-05-28 09:58:26,150  INFO    [14/18] Skipped (exists): Cookeina tricholoma | obs 33767631 photo 1
+2026-05-28 09:58:26,151  INFO    [15/18] Skipped (exists): Herpothallon rubrocinctum | obs 19893807 photo 1
+2026-05-28 09:58:26,151  INFO    [16/18] Skipped (exists): Favolus brasiliensis | obs 18949452 photo 1
+2026-05-28 09:58:26,152  INFO    [17/18] Skipped (exists): Laternea dringii | obs 12419489 photo 1
+2026-05-28 09:58:26,152  INFO    [17/18] Skipped (exists): Laternea dringii | obs 12419489 photo 2
+2026-05-28 09:58:26,153  INFO    [17/18] Skipped (exists): Laternea dringii | obs 12419489 photo 3
+2026-05-28 09:58:26,153  INFO    [18/18] Skipped (exists): Cookeina speciosa | obs 10315503 photo 1
+2026-05-28 09:58:26,154  INFO  
+2026-05-28 09:58:26,154  INFO    Images newly downloaded : 0
+2026-05-28 09:58:26,155  INFO    Images skipped (exist)  : 27
+2026-05-28 09:58:26,155  INFO    Images failed           : 0
+2026-05-28 09:58:26,155  INFO    Unique species/taxa     : 11
+2026-05-28 09:58:26,155  INFO  
+2026-05-28 09:58:26,156  INFO  [3/3] Writing species_list.csv...
+2026-05-28 09:58:26,158  INFO    Saved to davao_fungi_dataset\species_list.csv
+2026-05-28 09:58:26,158  INFO  
+2026-05-28 09:58:26,158  INFO  ============================================================
+2026-05-28 09:58:26,158  INFO  DONE
+2026-05-28 09:58:26,158  INFO    Observations fetched : 18
+2026-05-28 09:58:26,158  INFO    Unique species       : 11
+2026-05-28 09:58:26,162  INFO    Total images on disk : 27
+2026-05-28 09:58:26,163  INFO    Output folder        : C:\Users\Sui\mushroom__classifier\davao_fungi_dataset
+2026-05-28 09:58:26,163  INFO  ============================================================
+2026-05-28 09:58:26,163  INFO  
+2026-05-28 09:58:26,163  INFO  NEXT STEPS:
+2026-05-28 09:58:26,164  INFO    1. Open species_list.csv
+2026-05-28 09:58:26,164  INFO    2. Fill in the edibility column for each species:
+2026-05-28 09:58:26,164  INFO         edible / poisonous / unknown
+2026-05-28 09:58:26,164  INFO    3. Use the labeled CSV + images/ folder to train your model
+2026-05-28 09:58:26,164  INFO  ============================================================

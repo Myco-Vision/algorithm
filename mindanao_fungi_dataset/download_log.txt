@@ -1,0 +1,181 @@
+2026-05-28 10:22:01,802  INFO  ============================================================
+2026-05-28 10:22:01,802  INFO  iNaturalist Mindanao Fungi Downloader (Expanded)
+2026-05-28 10:22:01,802  INFO  ============================================================
+2026-05-28 10:22:01,802  INFO  
+2026-05-28 10:22:01,802  INFO  --- Searching: Mindanao | quality=research | place_id=8225 ---
+2026-05-28 10:22:01,802  INFO    Fetching page 1...
+2026-05-28 10:22:03,050  ERROR    API error: 422 Client Error: Unprocessable Entity for url: https://api.inaturalist.org/v1/observations?place_id=8225&taxon_id=47170&quality_grade=research&per_page=200&page=1&order=desc&order_by=created_at&photos=true
+2026-05-28 10:22:03,052  INFO  
+2026-05-28 10:22:03,052  INFO  --- Searching: Mindanao | quality=needs_id | place_id=8225 ---
+2026-05-28 10:22:03,052  INFO    Fetching page 1...
+2026-05-28 10:22:04,137  ERROR    API error: 422 Client Error: Unprocessable Entity for url: https://api.inaturalist.org/v1/observations?place_id=8225&taxon_id=47170&quality_grade=needs_id&per_page=200&page=1&order=desc&order_by=created_at&photos=true
+2026-05-28 10:22:04,141  INFO  
+2026-05-28 10:22:04,141  INFO  --- Searching: Davao City | quality=research | place_id=29052 ---
+2026-05-28 10:22:04,141  INFO    Fetching page 1...
+2026-05-28 10:22:05,722  INFO    Total available: 18
+2026-05-28 10:22:07,738  INFO    Downloaded: Coprinellus disseminatus | obs 264526536 img 1
+2026-05-28 10:22:09,679  INFO    Downloaded: Coprinellus disseminatus | obs 263206825 img 1
+2026-05-28 10:22:11,563  INFO    Downloaded: Coprinellus disseminatus | obs 263206825 img 2
+2026-05-28 10:22:13,312  INFO    Downloaded: Psilocybe cubensis | obs 256189691 img 1
+2026-05-28 10:22:14,942  INFO    Downloaded: Trametes villosa | obs 236773556 img 1
+2026-05-28 10:22:16,507  INFO    Downloaded: Trametes villosa | obs 236773556 img 2
+2026-05-28 10:22:24,649  INFO    Downloaded: Trametes villosa | obs 236773556 img 3
+2026-05-28 10:22:26,860  INFO    Downloaded: Herpothallon rubrocinctum | obs 201164582 img 1
+2026-05-28 10:22:29,084  INFO    Downloaded: Herpothallon rubrocinctum | obs 200930926 img 1
+2026-05-28 10:22:31,333  INFO    Downloaded: Herpothallon rubrocinctum | obs 200930908 img 1
+2026-05-28 10:22:33,217  INFO    Downloaded: Herpothallon rubrocinctum | obs 200919993 img 1
+2026-05-28 10:22:34,719  INFO    Downloaded: Heimiomyces tenuipes | obs 154024496 img 1
+2026-05-28 10:22:36,150  INFO    Downloaded: Phlebopus beniensis | obs 95869713 img 1
+2026-05-28 10:22:37,548  INFO    Downloaded: Phlebopus beniensis | obs 95869713 img 2
+2026-05-28 10:22:39,097  INFO    Downloaded: Phlebopus beniensis | obs 95869713 img 3
+2026-05-28 10:22:40,498  INFO    Downloaded: Phlebopus beniensis | obs 82418840 img 1
+2026-05-28 10:22:45,703  INFO    Downloaded: Phlebopus beniensis | obs 82418840 img 2
+2026-05-28 10:22:47,205  INFO    Downloaded: Phlebopus beniensis | obs 82418840 img 3
+2026-05-28 10:22:49,073  INFO    Downloaded: Herpothallon rubrocinctum | obs 37216237 img 1
+2026-05-28 10:22:50,486  INFO    Downloaded: Clathrus natalensis | obs 34814814 img 1
+2026-05-28 10:22:51,929  INFO    Downloaded: Cookeina tricholoma | obs 33767631 img 1
+2026-05-28 10:22:54,035  INFO    Downloaded: Herpothallon rubrocinctum | obs 19893807 img 1
+2026-05-28 10:22:56,012  INFO    Downloaded: Favolus brasiliensis | obs 18949452 img 1
+2026-05-28 10:22:57,585  INFO    Downloaded: Laternea dringii | obs 12419489 img 1
+2026-05-28 10:22:59,173  INFO    Downloaded: Laternea dringii | obs 12419489 img 2
+2026-05-28 10:23:00,726  INFO    Downloaded: Laternea dringii | obs 12419489 img 3
+2026-05-28 10:23:15,977  INFO    Downloaded: Cookeina speciosa | obs 10315503 img 1
+2026-05-28 10:23:15,978  INFO    New unique observations this pass: 18
+2026-05-28 10:23:15,978  INFO  
+2026-05-28 10:23:15,979  INFO  --- Searching: Davao City | quality=needs_id | place_id=29052 ---
+2026-05-28 10:23:15,979  INFO    Fetching page 1...
+2026-05-28 10:23:17,931  INFO    Total available: 69
+2026-05-28 10:23:31,919  INFO    Downloaded: Ramalina celastri | obs 349769748 img 1
+2026-05-28 10:23:33,919  INFO    Downloaded: Usnea | obs 349698227 img 1
+2026-05-28 10:23:35,834  INFO    Downloaded: Leptogium | obs 349698009 img 1
+2026-05-28 10:23:38,234  INFO    Downloaded: Agaricomycetes | obs 331024691 img 1
+2026-05-28 10:24:34,143  WARNING      FAILED https://inaturalist-open-data.s3.amazonaws.com/photos/600410002/medium.jpg: HTTPSConnectionPool(host='inaturalist-open-data.s3.amazonaws.com', port=443): Read timed out.
+2026-05-28 10:24:36,279  INFO    Downloaded: Agaricomycetes | obs 331024387 img 2
+2026-05-28 10:24:37,847  INFO    Downloaded: Cantharellus lateritius | obs 330050444 img 1
+2026-05-28 10:24:39,743  INFO    Downloaded: Polyporaceae | obs 327186751 img 1
+2026-05-28 10:24:41,797  INFO    Downloaded: Polyporaceae | obs 327186751 img 2
+2026-05-28 10:24:43,891  INFO    Downloaded: Auricularia delicata | obs 323674783 img 1
+2026-05-28 10:24:45,965  INFO    Downloaded: Auricularia fuscosuccinea | obs 323526571 img 1
+2026-05-28 10:24:48,363  INFO    Downloaded: Marasmius | obs 320157570 img 1
+2026-05-28 10:24:50,454  INFO    Downloaded: Marasmius | obs 320157570 img 2
+2026-05-28 10:24:52,483  INFO    Downloaded: Pleurotus | obs 265642384 img 1
+2026-05-28 10:24:54,605  INFO    Downloaded: Disseminati | obs 263207268 img 1
+2026-05-28 10:24:56,465  INFO    Downloaded: Clitopilus hobsonii | obs 263206929 img 1
+2026-05-28 10:24:58,411  INFO    Downloaded: Rigidoporus microporus | obs 263206725 img 1
+2026-05-28 10:25:00,294  INFO    Downloaded: Trametes sanguinea | obs 247355367 img 1
+2026-05-28 10:25:02,157  INFO    Downloaded: Trametes sanguinea | obs 247355367 img 2
+2026-05-28 10:25:03,984  INFO    Downloaded: Hygrocybe | obs 216014779 img 1
+2026-05-28 10:25:07,072  INFO    Downloaded: Hygrocybe | obs 216014779 img 2
+2026-05-28 10:25:08,887  INFO    Downloaded: Ascomycota | obs 201207288 img 1
+2026-05-28 10:25:10,991  INFO    Downloaded: Usnea | obs 201164704 img 1
+2026-05-28 10:25:12,883  INFO    Downloaded: Coenogonium | obs 201119074 img 1
+2026-05-28 10:25:14,723  INFO    Downloaded: Ramalina | obs 201040784 img 1
+2026-05-28 10:26:08,581  INFO    Downloaded: Ramalina | obs 201040784 img 2
+2026-05-28 10:26:10,460  INFO    Downloaded: Lecanorales | obs 201040783 img 1
+2026-05-28 10:27:01,635  WARNING      FAILED https://inaturalist-open-data.s3.amazonaws.com/photos/354793588/medium.jpeg: HTTPSConnectionPool(host='inaturalist-open-data.s3.amazonaws.com', port=443): Read timed out.
+2026-05-28 10:27:04,009  INFO    Downloaded: Lecanoromycetes | obs 201040780 img 1
+2026-05-28 10:27:06,195  INFO    Downloaded: Ascomycota | obs 201040776 img 1
+2026-05-28 10:27:08,163  INFO    Downloaded: Usnea | obs 201040775 img 1
+2026-05-28 10:27:10,377  INFO    Downloaded: Ascomycota | obs 201040747 img 1
+2026-05-28 10:27:12,585  INFO    Downloaded: Ascomycota | obs 200934847 img 1
+2026-05-28 10:27:29,099  INFO    Downloaded: Ascomycota | obs 200934830 img 1
+2026-05-28 10:27:31,328  INFO    Downloaded: Parmeliaceae | obs 200930910 img 1
+2026-05-28 10:27:33,399  INFO    Downloaded: Parmeliaceae | obs 200930910 img 2
+2026-05-28 10:27:54,545  WARNING      FAILED https://inaturalist-open-data.s3.amazonaws.com/photos/343516599/medium.jpg: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-05-28 10:27:56,829  INFO    Downloaded: Agaricales | obs 195286480 img 2
+2026-05-28 10:27:58,812  INFO    Downloaded: Lycoperdon curtisii | obs 195286277 img 1
+2026-05-28 10:28:00,976  INFO    Downloaded: Lycoperdon curtisii | obs 195286277 img 2
+2026-05-28 10:28:02,957  INFO    Downloaded: Polyporales | obs 195236713 img 1
+2026-05-28 10:28:04,996  INFO    Downloaded: Xylaria | obs 195236425 img 1
+2026-05-28 10:28:07,012  INFO    Downloaded: Cyathus | obs 195236369 img 1
+2026-05-28 10:28:08,941  INFO    Downloaded: Cyathus | obs 195236369 img 2
+2026-05-28 10:28:10,853  INFO    Downloaded: Coprinopsis | obs 195193120 img 1
+2026-05-28 10:28:12,765  INFO    Downloaded: Coprinopsis | obs 195193120 img 2
+2026-05-28 10:28:14,728  INFO    Downloaded: Calvatia | obs 195119373 img 1
+2026-05-28 10:28:16,515  INFO    Downloaded: Omphalina | obs 195118913 img 1
+2026-05-28 10:28:18,502  INFO    Downloaded: Omphalina | obs 195118913 img 2
+2026-05-28 10:28:20,406  INFO    Downloaded: Polyporales | obs 195118861 img 1
+2026-05-28 10:28:22,278  INFO    Downloaded: Polyporales | obs 195118861 img 2
+2026-05-28 10:28:24,125  INFO    Downloaded: Agaricomycetes | obs 195118832 img 1
+2026-05-28 10:28:26,018  INFO    Downloaded: Agaricomycetes | obs 195118832 img 2
+2026-05-28 10:28:27,936  INFO    Downloaded: Marasmius calhouniae | obs 195118761 img 1
+2026-05-28 10:28:29,959  INFO    Downloaded: Marasmius calhouniae | obs 195118761 img 2
+2026-05-28 10:28:35,431  INFO    Downloaded: Marasmius calhouniae | obs 195118761 img 3
+2026-05-28 10:28:37,428  INFO    Downloaded: Stropharia rugosoannulata | obs 195019641 img 1
+2026-05-28 10:28:39,383  INFO    Downloaded: Stropharia rugosoannulata | obs 195019641 img 2
+2026-05-28 10:28:41,266  INFO    Downloaded: Stropharia rugosoannulata | obs 195019641 img 3
+2026-05-28 10:28:43,250  INFO    Downloaded: Gymnopilus | obs 195019512 img 1
+2026-05-28 10:28:45,092  INFO    Downloaded: Gymnopilus | obs 195019512 img 2
+2026-05-28 10:28:47,066  INFO    Downloaded: Gymnopilus | obs 195019512 img 3
+2026-05-28 10:28:49,022  INFO    Downloaded: Antrodiella | obs 195019397 img 1
+2026-05-28 10:28:51,049  INFO    Downloaded: Antrodiella | obs 195019397 img 2
+2026-05-28 10:28:53,118  INFO    Downloaded: Polyporales | obs 195019105 img 1
+2026-05-28 10:28:55,139  INFO    Downloaded: Polyporales | obs 195019105 img 2
+2026-05-28 10:28:57,095  INFO    Downloaded: Fungi | obs 194939979 img 1
+2026-05-28 10:28:58,944  INFO    Downloaded: Fungi | obs 194939979 img 2
+2026-05-28 10:29:01,020  INFO    Downloaded: Fungi | obs 194939979 img 3
+2026-05-28 10:29:08,482  INFO    Downloaded: Dacrymyces | obs 192131939 img 1
+2026-05-28 10:29:10,412  INFO    Downloaded: Dacrymyces | obs 192131939 img 2
+2026-05-28 10:29:12,312  INFO    Downloaded: Trametes versicolor | obs 183266245 img 1
+2026-05-28 10:30:02,492  WARNING      FAILED https://inaturalist-open-data.s3.amazonaws.com/photos/264116912/medium.jpeg: HTTPSConnectionPool(host='inaturalist-open-data.s3.amazonaws.com', port=443): Read timed out.
+2026-05-28 10:30:06,859  INFO    Downloaded: Agaricomycetes | obs 129452319 img 1
+2026-05-28 10:30:08,717  INFO    Downloaded: Chlorophyllum rhacodes | obs 128153933 img 1
+2026-05-28 10:30:10,560  INFO    Downloaded: Chlorophyllum rhacodes | obs 128153933 img 2
+2026-05-28 10:30:12,271  INFO    Downloaded: Pleurotus pulmonarius | obs 119269129 img 1
+2026-05-28 10:30:39,088  INFO    Downloaded: Pleurotus pulmonarius | obs 119269129 img 2
+2026-05-28 10:30:40,925  INFO    Downloaded: Pleurotus pulmonarius | obs 119269129 img 3
+2026-05-28 10:30:46,631  INFO    Downloaded: Psathyrellaceae | obs 96383644 img 1
+2026-05-28 10:31:37,388  WARNING      FAILED https://inaturalist-open-data.s3.amazonaws.com/photos/156328859/medium.jpeg: HTTPSConnectionPool(host='inaturalist-open-data.s3.amazonaws.com', port=443): Read timed out.
+2026-05-28 10:31:39,298  INFO    Downloaded: Agaricales | obs 93423775 img 1
+2026-05-28 10:31:41,139  INFO    Downloaded: Oudemansiella | obs 93423485 img 1
+2026-05-28 10:31:42,956  INFO    Downloaded: Agaricales | obs 81321065 img 1
+2026-05-28 10:31:44,705  INFO    Downloaded: Agaricales | obs 81321065 img 2
+2026-05-28 10:31:46,548  INFO    Downloaded: Agaricales | obs 81321065 img 3
+2026-05-28 10:31:48,305  INFO    Downloaded: Boletaceae | obs 81316652 img 1
+2026-05-28 10:31:50,289  INFO    Downloaded: Boletaceae | obs 81316652 img 2
+2026-05-28 10:31:53,642  INFO    Downloaded: Boletaceae | obs 81316652 img 3
+2026-05-28 10:31:55,652  INFO    Downloaded: Xylaria hypoxylon | obs 71730499 img 1
+2026-05-28 10:32:00,609  INFO    Downloaded: Polyporales | obs 71257089 img 1
+2026-05-28 10:32:02,749  INFO    Downloaded: Agaricomycetes | obs 68379281 img 1
+2026-05-28 10:32:47,954  WARNING      FAILED https://inaturalist-open-data.s3.amazonaws.com/photos/110706260/medium.jpg: HTTPSConnectionPool(host='inaturalist-open-data.s3.amazonaws.com', port=443): Read timed out.
+2026-05-28 10:32:49,863  INFO    Downloaded: Coprinellus | obs 68378649 img 1
+2026-05-28 10:32:51,589  INFO    Downloaded: Coprinellus | obs 68378649 img 2
+2026-05-28 10:32:53,476  INFO    Downloaded: Coprinellus | obs 68378649 img 3
+2026-05-28 10:32:55,638  INFO    Downloaded: Auricularia | obs 68378622 img 1
+2026-05-28 10:32:57,631  INFO    Downloaded: Auricularia | obs 68378622 img 2
+2026-05-28 10:32:59,725  INFO    Downloaded: Auricularia | obs 68378484 img 1
+2026-05-28 10:33:49,784  INFO    Downloaded: Auricularia | obs 68378484 img 2
+2026-05-28 10:33:51,815  INFO    Downloaded: Auricularia | obs 68378484 img 3
+2026-05-28 10:33:53,784  INFO    Downloaded: Fungi | obs 68338969 img 1
+2026-05-28 10:33:55,809  INFO    Downloaded: Geastrum | obs 68336887 img 1
+2026-05-28 10:33:57,714  INFO    Downloaded: Geastrum | obs 68336887 img 2
+2026-05-28 10:33:59,650  INFO    Downloaded: Phillipsia | obs 68336844 img 1
+2026-05-28 10:34:01,652  INFO    Downloaded: Geastrum | obs 68292722 img 1
+2026-05-28 10:34:03,712  INFO    Downloaded: Favolus brasiliensis | obs 68292669 img 1
+2026-05-28 10:34:05,721  INFO    Downloaded: Favolus brasiliensis | obs 68292669 img 2
+2026-05-28 10:34:07,696  INFO    Downloaded: Polyporales | obs 68292552 img 1
+2026-05-28 10:34:36,983  INFO    Downloaded: Polyporales | obs 68292552 img 2
+2026-05-28 10:34:38,877  INFO    Downloaded: Clathrus | obs 33335921 img 1
+2026-05-28 10:34:38,877  INFO    New unique observations this pass: 69
+2026-05-28 10:34:38,878  INFO  
+2026-05-28 10:34:38,879  INFO  Writing species_list.csv...
+2026-05-28 10:34:38,885  INFO    Saved 59 species to mindanao_fungi_dataset\species_list.csv
+2026-05-28 10:34:38,886  INFO  
+2026-05-28 10:34:38,888  INFO  ============================================================
+2026-05-28 10:34:38,889  INFO  DONE
+2026-05-28 10:34:38,889  INFO    Unique observations : 87
+2026-05-28 10:34:38,890  INFO    Unique species      : 59
+2026-05-28 10:34:38,891  INFO    Images downloaded   : 132
+2026-05-28 10:34:38,892  INFO    Images skipped      : 0
+2026-05-28 10:34:38,892  INFO    Images failed       : 6
+2026-05-28 10:34:38,927  INFO    Total images on disk: 137
+2026-05-28 10:34:38,928  INFO    Output folder       : C:\Users\Sui\mushroom__classifier\mindanao_fungi_dataset
+2026-05-28 10:34:38,928  INFO  ============================================================
+2026-05-28 10:34:38,928  INFO  
+2026-05-28 10:34:38,928  INFO  NEXT STEPS:
+2026-05-28 10:34:38,929  INFO    1. Open species_list.csv
+2026-05-28 10:34:38,929  INFO    2. Fill in edibility column: edible / poisonous / unknown
+2026-05-28 10:34:38,929  INFO    3. Move images from images/unlabeled/<species>/ into
+2026-05-28 10:34:38,929  INFO         images/edible/   or   images/poisonous/
+2026-05-28 10:34:38,929  INFO    4. Merge with Kaggle dataset (see README below)
+2026-05-28 10:34:38,929  INFO  ============================================================
