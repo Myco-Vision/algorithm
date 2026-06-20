@@ -1,103 +1,142 @@
-"""
-predict.py - Mushroom Photo Predictor
-======================================
-Give it a mushroom photo and it will tell you
-if it is EDIBLE or POISONOUS.
-
-HOW TO RUN:
-    python predict.py your_photo.jpg
-
-EXAMPLE:
-    python predict.py mushroom1.jpg
-"""
-
-import sys
-import numpy as np
-import tensorflow as tf
-from tensorflow.keras.preprocessing import image
+import argparse
+import json
 import os
+import sys
+import tempfile
+from pathlib import Path
 
-# ─────────────────────────────────────────────
-# SETTINGS
-# ─────────────────────────────────────────────
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "matplotlib"))
 
-MODEL_PATH = "models/best_model.keras"  # path to your trained model
-IMG_SIZE   = (224, 224)                 # must match what you trained with
-THRESHOLD  = 0.3                        # below = edible, above = poisonous
-                                        # 0.3 means we flag poisonous earlier
-                                        # to be safe (less risky)
+import numpy as np
 
 
-# ─────────────────────────────────────────────
-# LOAD MODEL
-# ─────────────────────────────────────────────
+BASE_DIR = Path(__file__).resolve().parent
+MODEL_PATH = BASE_DIR / "models" / "mushroom_image_model.h5"
+CLASSES_PATH = BASE_DIR / "models" / "class_indices.npy"
+IMAGE_SIZE = (224, 224)
+THRESHOLD = 0.5
 
-def load_model():
-    if not os.path.exists(MODEL_PATH):
-        print(" No trained model found!")
-        print(f"   Expected at: {MODEL_PATH}")
-        print("   Please run train.py first.")
-        sys.exit(1)
 
-    print(" Loading model...")
+class PredictionError(Exception):
+    """Raised when the image cannot be analyzed safely."""
+
+
+_TF = None
+
+
+def get_tensorflow():
+    global _TF
+    if _TF is None:
+        import tensorflow as tf
+        from absl import logging as absl_logging
+
+        tf.get_logger().setLevel("ERROR")
+        absl_logging.set_verbosity(absl_logging.ERROR)
+        _TF = tf
+    return _TF
+
+
+def load_assets():
+    if not MODEL_PATH.exists():
+        raise PredictionError(f"Model file not found: {MODEL_PATH}")
+    if not CLASSES_PATH.exists():
+        raise PredictionError(f"Class map file not found: {CLASSES_PATH}")
+
+    tf = get_tensorflow()
     model = tf.keras.models.load_model(MODEL_PATH)
-    print(" Model loaded!\n")
-    return model
+    class_indices = np.load(CLASSES_PATH, allow_pickle=True).item()
+    labels_map = {value: key for key, value in class_indices.items()}
+    return model, labels_map
 
 
-# ─────────────────────────────────────────────
-# PREDICT A SINGLE PHOTO
-# ─────────────────────────────────────────────
+def preprocess_image(image_path):
+    image_path = Path(image_path).expanduser().resolve()
 
-def predict(img_path, model):
-    # Check if photo exists
-    if not os.path.exists(img_path):
-        print(f" Photo not found: {img_path}")
-        sys.exit(1)
+    if not image_path.exists():
+        raise PredictionError(f"Image file not found: {image_path}")
+    if not image_path.is_file():
+        raise PredictionError(f"Image path is not a file: {image_path}")
 
-    # Load and prepare the photo
-    img = image.load_img(img_path, target_size=IMG_SIZE)
-    img_array = image.img_to_array(img) / 255.0       # normalize
-    img_array = np.expand_dims(img_array, axis=0)     # add batch dimension
+    try:
+        tf = get_tensorflow()
+        image = tf.keras.utils.load_img(
+            image_path,
+            target_size=IMAGE_SIZE,
+            color_mode="rgb",
+        )
+    except Exception as exc:
+        raise PredictionError(
+            "The uploaded file is not a readable image. Use JPG, PNG, or JPEG."
+        ) from exc
 
-    # Run prediction
-    probability = model.predict(img_array, verbose=0)[0][0]
+    image_array = tf.keras.utils.img_to_array(image)
+    image_array = image_array / 255.0
+    return np.expand_dims(image_array, axis=0), image_path
 
-    # Interpret result
-    is_poisonous = probability > THRESHOLD
-    label      = "  POISONOUS" if is_poisonous else " EDIBLE"
-    confidence = probability if is_poisonous else 1 - probability
 
-    # Print result
-    print("=" * 40)
-    print(f"  Photo     : {img_path}")
-    print(f"  Result    : {label}")
-    print(f"  Confidence: {confidence:.1%}")
-    print(f"  Raw Score : {probability:.4f}  (threshold: {THRESHOLD})")
-    print("=" * 40)
+def predict_mushroom(image_path):
+    image_batch, resolved_image_path = preprocess_image(image_path)
+    model, labels_map = load_assets()
 
-    # Safety warning
-    if is_poisonous:
-        print("\n  WARNING: Do NOT eat this mushroom!")
-        print("   Always confirm with a real expert before consuming any wild mushroom.")
+    raw_score = float(model.predict(image_batch, verbose=0)[0][0])
+    predicted_index = 1 if raw_score >= THRESHOLD else 0
+    label = labels_map.get(
+        predicted_index, "poisonous" if predicted_index else "edible"
+    )
+    confidence = raw_score if predicted_index else 1 - raw_score
+
+    return {
+        "ok": True,
+        "image": str(resolved_image_path),
+        "label": label,
+        "is_poisonous": label.lower() == "poisonous",
+        "confidence": round(confidence, 4),
+        "confidence_percent": round(confidence * 100, 2),
+        "raw_score": round(raw_score, 6),
+        "threshold": THRESHOLD,
+        "warning": "Do not eat wild mushrooms based only on AI prediction.",
+    }
+
+
+def print_human_result(result):
+    label = result["label"].upper()
+    confidence = result["confidence_percent"]
+
+    print("=" * 45)
+    print(f"RESULT: This mushroom looks {label}.")
+    print(f"CONFIDENCE: {confidence:.2f}%")
+    print(f"RAW SCORE: {result['raw_score']} (threshold: {result['threshold']})")
+    print(result["warning"])
+    print("=" * 45)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Predict if a mushroom image is edible or poisonous."
+    )
+    parser.add_argument("image", nargs="?", default=str(BASE_DIR / "test_mushroom.jpg"))
+    parser.add_argument(
+        "--json", action="store_true", help="Print machine-readable JSON."
+    )
+    args = parser.parse_args()
+
+    try:
+        result = predict_mushroom(args.image)
+    except PredictionError as exc:
+        error = {"ok": False, "error": str(exc)}
+        if args.json:
+            print(json.dumps(error))
+        else:
+            print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(result))
     else:
-        print("\n Looks edible — but always confirm with an expert before eating!")
+        print_human_result(result)
+    return 0
 
-    return label, confidence
-
-
-# ─────────────────────────────────────────────
-# RUN
-# ─────────────────────────────────────────────
 
 if __name__ == "__main__":
-    # Get photo path from command line
-    if len(sys.argv) < 2:
-        print(" Please provide a photo path.")
-        print("   Usage: python predict.py your_photo.jpg")
-        sys.exit(1)
-
-    photo_path = sys.argv[1]
-
-    model = load_model()
-    predict(photo_path, model)
+    raise SystemExit(main())
