@@ -1,0 +1,8 @@
+{
+  "python.defaultInterpreterPath": "/Applications/XAMPP/xamppfiles/htdocs/algorithm/venv/bin/python",
+  "python.analysis.extraPaths": [
+    "/Applications/XAMPP/xamppfiles/htdocs/algorithm/venv/lib/python3.12/site-packages"
+  ],
+  "pyrefly.pythonPath": "/Applications/XAMPP/xamppfiles/htdocs/algorithm/venv/bin/python"
+}
+

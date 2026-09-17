@@ -29,6 +29,7 @@ def convert_to_webp(file) -> str:
 
 
 @app.route("/classify", methods=["POST"])
+@app.route("/predict", methods=["POST"])
 def classify():
     if "image" not in request.files:
         return jsonify({"message": "No image provided."}), 400
@@ -56,8 +57,10 @@ def classify():
 
     return jsonify(
         {
+            "species": result["label"],
             "result_name": result["label"].capitalize(),
             "result_classification": result["label"],
+            "confidence": result["confidence_percent"],
             "confidence_level": result["confidence_percent"],
             "is_poisonous": result["is_poisonous"],
             "raw_score": result["raw_score"],
@@ -67,4 +70,5 @@ def classify():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=True, host="0.0.0.0", port=port)
