@@ -79,21 +79,20 @@ def predict_mushroom(image_path):
     image_batch, resolved_image_path = preprocess_image(image_path)
     model, labels_map = load_assets()
 
-    raw_score = float(model.predict(image_batch, verbose=0)[0][0])
-    predicted_index = 1 if raw_score >= THRESHOLD else 0
-    label = labels_map.get(
-        predicted_index, "poisonous" if predicted_index else "edible"
-    )
-    confidence = raw_score if predicted_index else 1 - raw_score
+    predictions = model.predict(image_batch, verbose=0)[0]  # shape (3,) — softmax probs
+    predicted_index = int(np.argmax(predictions))
+    confidence = float(predictions[predicted_index])
+    label = labels_map.get(predicted_index, "unknown")
 
     return {
         "ok": True,
         "image": str(resolved_image_path),
         "label": label,
         "is_poisonous": label.lower() == "poisonous",
+        "is_mushroom": label.lower() != "not_mushroom",
         "confidence": round(confidence, 4),
         "confidence_percent": round(confidence * 100, 2),
-        "raw_score": round(raw_score, 6),
+        "raw_score": [round(float(p), 6) for p in predictions],
         "threshold": THRESHOLD,
         "warning": "Do not eat wild mushrooms based only on AI prediction.",
     }
@@ -104,16 +103,16 @@ def print_human_result(result):
     confidence = result["confidence_percent"]
 
     print("=" * 45)
-    print(f"RESULT: This mushroom looks {label}.")
+    print(f"RESULT: This looks like {label}.")
     print(f"CONFIDENCE: {confidence:.2f}%")
-    print(f"RAW SCORE: {result['raw_score']} (threshold: {result['threshold']})")
+    print(f"RAW SCORE: {result['raw_score']}")
     print(result["warning"])
     print("=" * 45)
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Predict if a mushroom image is edible or poisonous."
+        description="Predict if an image is an edible mushroom, poisonous mushroom, or not a mushroom."
     )
     parser.add_argument("image", nargs="?", default=str(BASE_DIR / "test_mushroom.jpg"))
     parser.add_argument(

@@ -19,17 +19,12 @@ def convert_to_webp(file) -> str:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".webp") as tmp:
         tmp_path = tmp.name
 
-    image = Image.open(file).convert(
-        "RGB"
-    )  # convert to RGB first (handles PNG transparency)
-    image.save(
-        tmp_path, "WEBP", quality=85
-    )  # quality 85 = good balance of size vs clarity
+    image = Image.open(file).convert("RGB")
+    image.save(tmp_path, "WEBP", quality=85)
     return tmp_path
 
 
 @app.route("/classify", methods=["POST"])
-@app.route("/predict", methods=["POST"])
 def classify():
     if "image" not in request.files:
         return jsonify({"message": "No image provided."}), 400
@@ -42,9 +37,7 @@ def classify():
     tmp_path = None
 
     try:
-        # Convert to WebP regardless of original format
         tmp_path = convert_to_webp(file)
-
         result = predict_mushroom(tmp_path)
 
     except PredictionError as exc:
@@ -53,14 +46,22 @@ def classify():
         return jsonify({"message": "Classification failed.", "detail": str(exc)}), 500
     finally:
         if tmp_path and os.path.exists(tmp_path):
-            os.unlink(tmp_path)  # always clean up temp file
+            os.unlink(tmp_path)
+
+    if not result["is_mushroom"]:
+        return jsonify(
+            {
+                "result_name": "Not a mushroom",
+                "result_classification": "not_mushroom",
+                "confidence_level": result["confidence_percent"],
+                "warning": "No mushroom detected in the image.",
+            }
+        ), 200
 
     return jsonify(
         {
-            "species": result["label"],
             "result_name": result["label"].capitalize(),
             "result_classification": result["label"],
-            "confidence": result["confidence_percent"],
             "confidence_level": result["confidence_percent"],
             "is_poisonous": result["is_poisonous"],
             "raw_score": result["raw_score"],
@@ -70,5 +71,4 @@ def classify():
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(debug=True, host="0.0.0.0", port=port)
+    app.run(debug=True, host="0.0.0.0", port=5000)
