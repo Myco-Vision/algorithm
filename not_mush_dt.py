@@ -12,18 +12,20 @@ THUMB_WIDTH = 640           # downloaded width in pixels (plenty for 224x224 tra
 SLEEP_SECONDS = 1.0
 
 SEARCH_TERMS = [
-    "forest floor",
-    "leaf litter",
-    "dry leaves on ground",
-    "soil",
-    "dirt ground",
-    "mud",
-    "mulch",
-    "gravel path",
-    "rainforest floor",
-    "grass lawn close-up",
-    "tree roots ground",
-    "forest trail",
+    # "forest floor",
+    # "leaf litter",
+    # "dry leaves on ground",
+    # "soil",
+    # "dirt ground",
+    # "mud",
+    # "mulch",
+    # "gravel path",
+    # "rainforest floor",
+    # "grass lawn close-up",
+    # "tree roots ground",
+    # "forest trail",
+    "desk", "kitchen utensils", "household objects", "living room",
+    "office supplies", "bedroom", "bookshelf", "table setting",
 ]
 
 # Skip anything whose title/description/categories hint at fungi.
