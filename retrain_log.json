@@ -1,0 +1,15 @@
+[
+  {
+    "started_at": "2026-10-23T17:57:09.806214Z",
+    "status": "done",
+    "error": null,
+    "finished_at": "2026-10-23T17:58:26.881897Z",
+    "new_edible": 7,
+    "new_poisonous": 4,
+    "total_edible": 11,
+    "total_poisonous": 8,
+    "total_images": 19,
+    "train_accuracy": 100.0,
+    "val_accuracy": 100.0
+  }
+]
