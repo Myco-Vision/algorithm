@@ -1,25 +1,26 @@
 """
-iNaturalist Mindanao Fungi Image Downloader (Expanded)
-======================================================
-Wider search than the Davao-only version:
-  - Covers all of Mindanao (place_id=8225)
-  - Includes needs_id grade (not just research grade)
-  - Falls back to Davao City (place_id=29052) as a second pass
-  - Skips already-downloaded images (safe to re-run)
+iNaturalist Mushroom Image Downloader - Mindanao + Philippines + wider region
+=============================================================================
+Multi-target version of download_oyster_mushrooms.py.
+
+Targets (each goes to its own class folder):
+  oyster      -> Pleurotus ostreatus / P. pulmonarius          -> edible/
+  gymnopilus  -> genus Gymnopilus (all descendant species)     -> poisonous/
+
+- Pass order per target: Mindanao -> Philippines -> nearby countries -> worldwide (capped)
+- Deduped by observation id within each target
+- Resolves taxon/place IDs from the API at runtime
+- Skips already-downloaded images (safe to re-run)
 
 Usage:
-    python download_mindanao_fungi.py
+    python download_mushrooms.py                 # run all targets
+    python download_mushrooms.py gymnopilus      # run only Gymnopilus
+    python download_mushrooms.py oyster          # run only oyster
 
 Output:
-    mindanao_fungi_dataset/
-        images/
-            edible/          <- move images here after labeling
-            poisonous/       <- move images here after labeling
-            unlabeled/       <- all raw downloads land here first
-                Phlebopus_beniensis/
-                    obs_12345_1.jpg
-        species_list.csv
-        download_log.txt
+    mushroom_downloads/<target>/species_list.csv
+    mushroom_downloads/<target>/observations.csv
+    mushroom_downloads/download_log.txt
 """
 
 import csv
@@ -30,29 +31,57 @@ import requests
 from pathlib import Path
 from urllib.parse import urlparse
 
-# ── CONFIG ────────────────────────────────────────────────────────────────────
+# -- CONFIG -------------------------------------------------------------------
 
-SEARCH_TARGETS = [
-    {"label": "Mindanao",   "place_id": 8225,  "quality": "research"},
-    {"label": "Mindanao",   "place_id": 8225,  "quality": "needs_id"},
-    {"label": "Davao City", "place_id": 29052, "quality": "research"},
-    {"label": "Davao City", "place_id": 29052, "quality": "needs_id"},
+DATASET_ROOT  = Path(r"C:\Users\Sui\Documents\MycoVision\algorithm\mushroom_dataset")
+EDIBLE_DIR    = DATASET_ROOT / "edible"
+POISONOUS_DIR = DATASET_ROOT / "poisonous"
+
+# (label, place name to resolve, fallback place_id or None, cap on new obs per pass or None)
+PLACES = [
+    ("Mindanao",    "Mindanao",    8225, None),
+    ("Philippines", "Philippines", None, None),
+    ("Indonesia",   "Indonesia",   None, None),
+    ("Malaysia",    "Malaysia",    None, None),
+    ("Thailand",    "Thailand",    None, None),
+    ("Vietnam",     "Vietnam",     None, None),
+    ("Taiwan",      "Taiwan",      None, None),
+    ("India",       "India",       None, None),
+    ("Worldwide",   None,          None, 1500),
 ]
 
-TAXON_ID            = 47170      # Fungi kingdom
-PER_PAGE            = 200        # Max allowed by iNaturalist API
-SLEEP_BETWEEN       = 1.2        # Seconds between API page calls
-IMG_SLEEP           = 0.4        # Seconds between image downloads
-MAX_IMAGES_PER_OBS  = 3          # Up to 3 photos per observation
-OUTPUT_DIR          = Path("mindanao_fungi_dataset")
+TARGETS = {
+    # "oyster": {
+    #     "taxa":      ["Pleurotus ostreatus", "Pleurotus pulmonarius"],
+    #     "rank":      "species",
+    #     "class_dir": EDIBLE_DIR,
+    #     "places":    PLACES,
+    # },
+    "gymnopilus": {
+        # Genus-level: iNaturalist includes all descendant species in the query.
+        # Labelled poisonous on purpose (safety bias): many species are bitter,
+        # some contain psilocybin. Folders are split per species for later review.
+        "taxa":      ["Gymnopilus"],
+        "rank":      "genus",
+        "class_dir": POISONOUS_DIR,
+        "places":    PLACES,
+    },
+}
+
+QUALITIES           = ["research", "needs_id"]
+PER_PAGE            = 200
+SLEEP_BETWEEN       = 1.2
+IMG_SLEEP           = 0.4
+MAX_IMAGES_PER_OBS  = 3
+OUTPUT_DIR          = Path("mushroom_downloads")
+PER_SPECIES_FOLDERS = True       # False = drop all images flat into class_dir
 
 API_BASE = "https://api.inaturalist.org/v1"
-HEADERS  = {"User-Agent": "MindanaoFungiResearch/1.0 (academic project)"}
+HEADERS  = {"User-Agent": "MycoVisionResearch/1.0 (academic project)"}
 
-# ── SETUP ─────────────────────────────────────────────────────────────────────
+# -- SETUP --------------------------------------------------------------------
 
-for sub in ["images/unlabeled", "images/edible", "images/poisonous"]:
-    (OUTPUT_DIR / sub).mkdir(parents=True, exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 stream_handler = logging.StreamHandler(sys.stdout)
 try:
@@ -66,11 +95,11 @@ file_handler = logging.FileHandler(OUTPUT_DIR / "download_log.txt", encoding="ut
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)s  %(message)s",
-    handlers=[file_handler, stream_handler]
+    handlers=[file_handler, stream_handler],
 )
 log = logging.getLogger(__name__)
 
-# ── HELPERS ───────────────────────────────────────────────────────────────────
+# -- HELPERS ------------------------------------------------------------------
 
 def safe_name(name: str) -> str:
     return name.replace(" ", "_").replace("/", "-").replace("\\", "-")
@@ -80,24 +109,59 @@ def best_image_url(photo: dict) -> str:
     return photo.get("url", "").replace("/square.", "/medium.")
 
 
-def fetch_page(place_id: int, quality: str, page: int) -> dict:
-    resp = requests.get(
-        f"{API_BASE}/observations",
-        params={
-            "place_id":      place_id,
-            "taxon_id":      TAXON_ID,
-            "quality_grade": quality,
-            "per_page":      PER_PAGE,
-            "page":          page,
-            "order":         "desc",
-            "order_by":      "created_at",
-            "photos":        "true",
-        },
-        headers=HEADERS,
-        timeout=30
-    )
+def api_get(path: str, params: dict) -> dict:
+    resp = requests.get(f"{API_BASE}{path}", params=params, headers=HEADERS, timeout=30)
     resp.raise_for_status()
     return resp.json()
+
+
+def resolve_taxon_ids(names, rank):
+    ids = []
+    for name in names:
+        try:
+            data = api_get("/taxa", {"q": name, "rank": rank, "per_page": 10})
+            for t in data.get("results", []):
+                if t.get("name", "").lower() == name.lower():
+                    log.info(f"Resolved taxon '{name}' ({rank}) -> id {t['id']}")
+                    ids.append(str(t["id"]))
+                    break
+            else:
+                log.error(f"No exact match for taxon '{name}' at rank '{rank}'")
+        except Exception as e:
+            log.error(f"Taxon lookup failed for '{name}': {e}")
+    return ",".join(ids)
+
+
+def resolve_place_id(name: str, fallback):
+    try:
+        data = api_get("/places/autocomplete", {"q": name, "per_page": 10})
+        results = data.get("results", [])
+        for p in results:
+            if p.get("name", "").lower() == name.lower():
+                log.info(f"Resolved place '{name}' -> id {p['id']}")
+                return p["id"]
+        if results:
+            log.info(f"Place '{name}' not exact; using '{results[0].get('name')}' -> id {results[0]['id']}")
+            return results[0]["id"]
+    except Exception as e:
+        log.error(f"Place lookup failed for '{name}': {e}")
+    if fallback:
+        log.info(f"Using fallback place_id {fallback} for '{name}'")
+    return fallback
+
+
+def fetch_page(place_id, taxon_id: str, quality: str, page: int) -> dict:
+    params = {} if place_id is None else {"place_id": place_id}
+    return api_get("/observations", {
+        **params,
+        "taxon_id":      taxon_id,
+        "quality_grade": quality,
+        "per_page":      PER_PAGE,
+        "page":          page,
+        "order":         "desc",
+        "order_by":      "created_at",
+        "photos":        "true",
+    })
 
 
 def download_image(url: str, dest: Path) -> str:
@@ -113,162 +177,196 @@ def download_image(url: str, dest: Path) -> str:
         return "downloaded"
     except Exception as e:
         log.warning(f"    FAILED {url}: {e}")
+        if dest.exists():
+            dest.unlink()
         return "failed"
 
 
-def count_images() -> int:
-    return sum(1 for f in (OUTPUT_DIR / "images").rglob("*") if f.is_file())
+def count_images(folders) -> int:
+    """Count images in this target's own species folders only."""
+    return sum(1 for d in folders for f in d.rglob("*") if f.is_file())
 
-# ── MAIN ──────────────────────────────────────────────────────────────────────
+# -- PER-TARGET RUN -----------------------------------------------------------
 
-def main():
+def run_target(key: str, cfg: dict):
+    log.info("")
     log.info("=" * 60)
-    log.info("iNaturalist Mindanao Fungi Downloader (Expanded)")
+    log.info(f"TARGET: {key}  ->  {cfg['class_dir']}")
     log.info("=" * 60)
 
-    seen_obs_ids = set()       # Avoid duplicate observations across passes
+    class_dir = cfg["class_dir"]
+    class_dir.mkdir(parents=True, exist_ok=True)
+    target_out = OUTPUT_DIR / key
+    target_out.mkdir(parents=True, exist_ok=True)
+
+    taxon_id = resolve_taxon_ids(cfg["taxa"], cfg["rank"])
+    if not taxon_id:
+        log.error(f"[{key}] Could not resolve any taxon ids. Skipping target.")
+        return
+    if len(taxon_id.split(",")) < len(cfg["taxa"]):
+        log.warning(f"[{key}] Only some taxa resolved; continuing with those.")
+
+    targets = []
+    for label, place_name, fallback, cap in cfg["places"]:
+        if place_name is None:
+            targets.append((label, None, cap))
+            continue
+        pid = resolve_place_id(place_name, fallback)
+        if pid:
+            targets.append((label, pid, cap))
+        else:
+            log.error(f"Skipping '{label}': no place id")
+
+    seen_obs_ids = set()
     species_stats = {}
-    total_downloaded = 0
-    total_skipped = 0
-    total_failed = 0
+    species_dirs = set()
+    obs_rows = []
+    total_downloaded = total_skipped = total_failed = 0
 
-    for target in SEARCH_TARGETS:
-        label    = target["label"]
-        place_id = target["place_id"]
-        quality  = target["quality"]
+    for label, place_id, cap in targets:
+        for quality in QUALITIES:
+            log.info("")
+            log.info(f"--- [{key}] {label} | quality={quality} | place_id={place_id} ---")
 
-        log.info("")
-        log.info(f"--- Searching: {label} | quality={quality} | place_id={place_id} ---")
+            page = 1
+            total_results = None
+            pass_new = 0
 
-        page = 1
-        total_results = None
-        pass_count = 0
+            while True:
+                log.info(f"  Fetching page {page}...")
+                try:
+                    data = fetch_page(place_id, taxon_id, quality, page)
+                except Exception as e:
+                    log.error(f"  API error: {e}")
+                    break
 
-        while True:
-            log.info(f"  Fetching page {page}...")
-            try:
-                data = fetch_page(place_id, quality, page)
-            except Exception as e:
-                log.error(f"  API error: {e}")
-                break
+                if total_results is None:
+                    total_results = data.get("total_results", 0)
+                    log.info(f"  Total available: {total_results}")
 
-            if total_results is None:
-                total_results = data.get("total_results", 0)
-                log.info(f"  Total available: {total_results}")
+                results = data.get("results", [])
+                if not results:
+                    break
 
-            results = data.get("results", [])
-            if not results:
-                break
+                for obs in results:
+                    if cap and pass_new >= cap:
+                        break
+                    obs_id = obs.get("id")
+                    if obs_id in seen_obs_ids:
+                        continue
+                    seen_obs_ids.add(obs_id)
+                    pass_new += 1
 
-            for obs in results:
-                obs_id = obs.get("id")
-                if obs_id in seen_obs_ids:
-                    continue
-                seen_obs_ids.add(obs_id)
-                pass_count += 1
+                    taxon = obs.get("taxon")
+                    if not taxon:
+                        continue
 
-                taxon = obs.get("taxon")
-                if not taxon:
-                    continue
+                    species_name = taxon.get("name", "Unknown")
+                    common_name  = taxon.get("preferred_common_name", "")
+                    rank         = taxon.get("rank", "")
 
-                species_name = taxon.get("name", "Unknown")
-                common_name  = taxon.get("preferred_common_name", "")
-                rank         = taxon.get("rank", "")
-
-                # Species folder under unlabeled/
-                species_dir = OUTPUT_DIR / "images" / "unlabeled" / safe_name(species_name)
-                species_dir.mkdir(exist_ok=True)
-
-                if species_name not in species_stats:
-                    species_stats[species_name] = {
-                        "common_name": common_name,
-                        "taxon_rank":  rank,
-                        "taxon_id":    taxon.get("id"),
-                        "obs_count":   0,
-                        "img_count":   0,
-                        "edibility":   "",
-                        "notes":       ""
-                    }
-                species_stats[species_name]["obs_count"] += 1
-
-                photos = obs.get("photos", [])[:MAX_IMAGES_PER_OBS]
-                for i, photo in enumerate(photos, 1):
-                    img_url = best_image_url(photo)
-                    ext     = Path(urlparse(img_url).path).suffix or ".jpg"
-                    dest    = species_dir / f"obs_{obs_id}_{i}{ext}"
-
-                    result = download_image(img_url, dest)
-                    if result == "downloaded":
-                        species_stats[species_name]["img_count"] += 1
-                        total_downloaded += 1
-                        log.info(f"  Downloaded: {species_name} | obs {obs_id} img {i}")
-                    elif result == "skipped":
-                        species_stats[species_name]["img_count"] += 1
-                        total_skipped += 1
+                    if PER_SPECIES_FOLDERS:
+                        species_dir = class_dir / safe_name(species_name)
+                        species_dir.mkdir(parents=True, exist_ok=True)
                     else:
-                        total_failed += 1
+                        species_dir = class_dir
+                    species_dirs.add(species_dir)
 
-            log.info(f"  New unique observations this pass: {pass_count}")
+                    if species_name not in species_stats:
+                        species_stats[species_name] = {
+                            "common_name": common_name,
+                            "taxon_rank":  rank,
+                            "taxon_id":    taxon.get("id"),
+                            "obs_count":   0,
+                            "img_count":   0,
+                        }
+                    species_stats[species_name]["obs_count"] += 1
 
-            if len(seen_obs_ids) >= (total_results or 0) or pass_count >= (total_results or 0):
-                break
+                    obs_rows.append({
+                        "obs_id":      obs_id,
+                        "species":     species_name,
+                        "region":      label,
+                        "quality":     obs.get("quality_grade", quality),
+                        "location":    obs.get("place_guess", ""),
+                        "latlng":      obs.get("location", ""),
+                        "observed_on": obs.get("observed_on", ""),
+                        "url":         obs.get("uri", ""),
+                    })
 
-            page += 1
-            time.sleep(SLEEP_BETWEEN)
+                    photos = obs.get("photos", [])[:MAX_IMAGES_PER_OBS]
+                    for i, photo in enumerate(photos, 1):
+                        img_url = best_image_url(photo)
+                        ext     = Path(urlparse(img_url).path).suffix or ".jpg"
+                        dest    = species_dir / f"obs_{obs_id}_{i}{ext}"
 
-    # ── Write CSV ─────────────────────────────────────────────────────────────
-    log.info("")
-    log.info("Writing species_list.csv...")
+                        result = download_image(img_url, dest)
+                        if result == "downloaded":
+                            species_stats[species_name]["img_count"] += 1
+                            total_downloaded += 1
+                            log.info(f"  Downloaded: {species_name} | obs {obs_id} img {i}")
+                        elif result == "skipped":
+                            species_stats[species_name]["img_count"] += 1
+                            total_skipped += 1
+                        else:
+                            total_failed += 1
 
-    csv_path   = OUTPUT_DIR / "species_list.csv"
-    fieldnames = [
-        "species_name", "common_name", "taxon_rank", "taxon_id",
-        "obs_count", "img_count", "edibility", "notes"
-    ]
+                if cap and pass_new >= cap:
+                    log.info(f"  Reached cap of {cap} new observations for this pass")
+                    break
 
-    sorted_species = sorted(
-        species_stats.items(),
-        key=lambda x: x[1]["obs_count"],
-        reverse=True
-    )
+                if page * PER_PAGE >= (total_results or 0):
+                    break
 
-    with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+                # iNaturalist API won't serve beyond 10,000 results per query
+                if page * PER_PAGE >= 10000:
+                    log.warning("  Hit the API's 10,000-result limit for this query")
+                    break
+
+                page += 1
+                time.sleep(SLEEP_BETWEEN)
+
+    # -- Write CSVs -----------------------------------------------------------
+    with open(target_out / "species_list.csv", "w", newline="", encoding="utf-8") as f:
+        fields = ["species_name", "common_name", "taxon_rank", "taxon_id", "obs_count", "img_count"]
+        writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
-        for name, s in sorted_species:
-            writer.writerow({
-                "species_name": name,
-                "common_name":  s["common_name"],
-                "taxon_rank":   s["taxon_rank"],
-                "taxon_id":     s["taxon_id"],
-                "obs_count":    s["obs_count"],
-                "img_count":    s["img_count"],
-                "edibility":    s["edibility"],
-                "notes":        s["notes"]
-            })
+        for name, s in sorted(species_stats.items(), key=lambda x: x[1]["obs_count"], reverse=True):
+            writer.writerow({"species_name": name, **s})
 
-    log.info(f"  Saved {len(species_stats)} species to {csv_path}")
+    with open(target_out / "observations.csv", "w", newline="", encoding="utf-8") as f:
+        fields = ["obs_id", "species", "region", "quality", "location", "latlng", "observed_on", "url"]
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(obs_rows)
 
-    # ── Summary ───────────────────────────────────────────────────────────────
     log.info("")
-    log.info("=" * 60)
-    log.info("DONE")
+    log.info(f"[{key}] DONE")
     log.info(f"  Unique observations : {len(seen_obs_ids)}")
     log.info(f"  Unique species      : {len(species_stats)}")
     log.info(f"  Images downloaded   : {total_downloaded}")
     log.info(f"  Images skipped      : {total_skipped}")
     log.info(f"  Images failed       : {total_failed}")
-    log.info(f"  Total images on disk: {count_images()}")
-    log.info(f"  Output folder       : {OUTPUT_DIR.resolve()}")
-    log.info("=" * 60)
+    log.info(f"  Images on disk (this target's folders): {count_images(species_dirs)}")
+    log.info(f"  CSVs                : {target_out.resolve()}")
+
+# -- MAIN ---------------------------------------------------------------------
+
+def main():
+    requested = [a.lower() for a in sys.argv[1:]] or list(TARGETS)
+    unknown = [r for r in requested if r not in TARGETS]
+    if unknown:
+        log.error(f"Unknown target(s): {unknown}. Choose from: {list(TARGETS)}")
+        return
+
+    for key in requested:
+        run_target(key, TARGETS[key])
+
     log.info("")
     log.info("NEXT STEPS:")
-    log.info("  1. Open species_list.csv")
-    log.info("  2. Fill in edibility column: edible / poisonous / unknown")
-    log.info("  3. Move images from images/unlabeled/<species>/ into")
-    log.info("       images/edible/   or   images/poisonous/")
-    log.info("  4. Merge with Kaggle dataset (see README below)")
-    log.info("=" * 60)
+    log.info("  1. Review the new folders for bad photos (wrong subject, blurry, lookalikes)")
+    log.info("  2. Gymnopilus: needs_id observations may be misidentified; filter by")
+    log.info("     quality in observations.csv if you want cleaner poisonous labels")
+    log.info("  3. Merge into your classifier dataset")
 
 
 if __name__ == "__main__":
