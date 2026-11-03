@@ -3,7 +3,8 @@ retrain.py — Myco-Vision AI Model Retraining Script
 =====================================================
 Called by Flask's /retrain endpoint (or manually from CLI).
 Accepts a JSON manifest of image paths + labels, copies them into
-mushroom_dataset/, then runs MobileNetV2 fine-tuning.
+mushroom_dataset/, then runs MobileNetV2 fine-tuning for 3-class classification
+(edible, not_mushroom, poisonous).
 
 Usage (CLI):
     python retrain.py --manifest /tmp/retrain_manifest.json
@@ -12,7 +13,7 @@ Manifest format:
     [
         {"path": "/absolute/path/to/image.jpg", "label": "edible"},
         {"path": "/absolute/path/to/image2.jpg", "label": "poisonous"},
-        ...
+        {"path": "/absolute/path/to/image3.jpg", "label": "not_mushroom"}
     ]
 """
 
@@ -33,14 +34,15 @@ DATASET_DIR = BASE_DIR / "mushroom_dataset"
 MODEL_DIR   = BASE_DIR / "models"
 LOG_PATH    = BASE_DIR / "retrain_log.json"
 
-EDIBLE_DIR    = DATASET_DIR / "edible"
-POISONOUS_DIR = DATASET_DIR / "poisonous"
+EDIBLE_DIR       = DATASET_DIR / "edible"
+POISONOUS_DIR    = DATASET_DIR / "poisonous"
+NOT_MUSHROOM_DIR = DATASET_DIR / "not_mushroom"
 
 IMAGE_SIZE = (224, 224)
 BATCH_SIZE = 4
 EPOCHS     = 20
 
-VALID_LABELS = {"edible", "poisonous"}
+VALID_LABELS = {"edible", "poisonous", "not_mushroom"}
 
 
 # ── Logging helpers ────────────────────────────────────────────────────────────
@@ -70,12 +72,13 @@ def append_log(entry: dict):
 def ingest_images(manifest: list) -> dict[str, int]:
     """
     Copy new images from the manifest into mushroom_dataset/.
-    Returns counts: {"edible": N, "poisonous": M}
+    Returns counts: {"edible": N, "poisonous": M, "not_mushroom": K}
     """
     EDIBLE_DIR.mkdir(parents=True, exist_ok=True)
     POISONOUS_DIR.mkdir(parents=True, exist_ok=True)
+    NOT_MUSHROOM_DIR.mkdir(parents=True, exist_ok=True)
 
-    counts = {"edible": 0, "poisonous": 0}
+    counts = {"edible": 0, "poisonous": 0, "not_mushroom": 0}
 
     for item in manifest:
         src   = Path(item["path"])
@@ -89,7 +92,13 @@ def ingest_images(manifest: list) -> dict[str, int]:
             print(f"[SKIP] File not found: {src}", flush=True)
             continue
 
-        dest_dir  = EDIBLE_DIR if label == "edible" else POISONOUS_DIR
+        if label == "edible":
+            dest_dir = EDIBLE_DIR
+        elif label == "poisonous":
+            dest_dir = POISONOUS_DIR
+        else:
+            dest_dir = NOT_MUSHROOM_DIR
+
         dest_path = dest_dir / src.name
 
         # Avoid overwrite collisions by appending a timestamp suffix
@@ -109,7 +118,8 @@ def ingest_images(manifest: list) -> dict[str, int]:
 
 def run_training() -> dict:
     """
-    Run MobileNetV2 transfer-learning on mushroom_dataset/.
+    Run MobileNetV2 transfer-learning on mushroom_dataset/ with 3 classes
+    (edible, not_mushroom, poisonous).
     Returns a result dict with accuracy and image counts.
     """
     os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
@@ -117,16 +127,21 @@ def run_training() -> dict:
     from tensorflow.keras import layers, models
 
     # Count images per class for the log
-    edible_count    = len(list(EDIBLE_DIR.glob("*.*")))
-    poisonous_count = len(list(POISONOUS_DIR.glob("*.*")))
-    total_images    = edible_count + poisonous_count
+    edible_count       = len(list(EDIBLE_DIR.glob("*.*")))
+    poisonous_count    = len(list(POISONOUS_DIR.glob("*.*")))
+    not_mushroom_count = len(list(NOT_MUSHROOM_DIR.glob("*.*")))
+    total_images       = edible_count + poisonous_count + not_mushroom_count
 
-    print(f"\n[INFO] Dataset — edible: {edible_count} | poisonous: {poisonous_count} | total: {total_images}", flush=True)
+    print(
+        f"\n[INFO] Dataset — edible: {edible_count} | poisonous: {poisonous_count} | "
+        f"not_mushroom: {not_mushroom_count} | total: {total_images}",
+        flush=True,
+    )
 
     if total_images == 0:
         raise ValueError("No images found in mushroom_dataset/. Aborting.")
-    if edible_count == 0 or poisonous_count == 0:
-        raise ValueError("Both 'edible' and 'poisonous' classes must have at least one image.")
+    if edible_count == 0 or poisonous_count == 0 or not_mushroom_count == 0:
+        raise ValueError("All 3 classes ('edible', 'poisonous', 'not_mushroom') must have at least one image.")
 
     # ── Data generators ──────────────────────────────────────────────────────
     augment = tf.keras.preprocessing.image.ImageDataGenerator(
@@ -144,7 +159,7 @@ def run_training() -> dict:
         str(DATASET_DIR),
         target_size=IMAGE_SIZE,
         batch_size=BATCH_SIZE,
-        class_mode="binary",
+        class_mode="categorical",
         shuffle=True,
     )
 
@@ -152,12 +167,16 @@ def run_training() -> dict:
         str(DATASET_DIR),
         target_size=IMAGE_SIZE,
         batch_size=BATCH_SIZE,
-        class_mode="binary",
+        class_mode="categorical",
         shuffle=False,
     )
 
     class_indices = train_gen.class_indices
-    print(f"[INFO] Class mapping: {class_indices}", flush=True)
+    num_classes = len(class_indices)
+    print(f"[INFO] Class mapping: {class_indices} ({num_classes} classes)", flush=True)
+
+    if num_classes != 3:
+        raise ValueError(f"Expected 3 classes in dataset, but found {num_classes}: {class_indices}")
 
     # ── Model ────────────────────────────────────────────────────────────────
     base_model = tf.keras.applications.MobileNetV2(
@@ -172,12 +191,12 @@ def run_training() -> dict:
         layers.GlobalAveragePooling2D(),
         layers.Dense(64, activation="relu"),
         layers.Dropout(0.5),
-        layers.Dense(1, activation="sigmoid"),
+        layers.Dense(num_classes, activation="softmax"),
     ])
 
     model.compile(
         optimizer="adam",
-        loss="binary_crossentropy",
+        loss="categorical_crossentropy",
         metrics=["accuracy"],
     )
 
@@ -204,11 +223,12 @@ def run_training() -> dict:
     print(f"\n[DONE] Model saved → {model_path}", flush=True)
 
     return {
-        "edible_count":     edible_count,
-        "poisonous_count":  poisonous_count,
-        "total_images":     total_images,
-        "train_accuracy":   round(final_accuracy * 100, 2),
-        "val_accuracy":     round(final_val_accuracy * 100, 2),
+        "edible_count":       edible_count,
+        "poisonous_count":    poisonous_count,
+        "not_mushroom_count": not_mushroom_count,
+        "total_images":       total_images,
+        "train_accuracy":     round(final_accuracy * 100, 2),
+        "val_accuracy":       round(final_val_accuracy * 100, 2),
     }
 
 
@@ -228,7 +248,7 @@ def main():
 
     try:
         # Optional: ingest new images from manifest
-        new_counts = {"edible": 0, "poisonous": 0}
+        new_counts = {"edible": 0, "poisonous": 0, "not_mushroom": 0}
         if args.manifest:
             manifest_path = Path(args.manifest)
             if not manifest_path.exists():
@@ -236,25 +256,32 @@ def main():
             manifest = json.loads(manifest_path.read_text())
             print(f"[INFO] Manifest has {len(manifest)} image(s).", flush=True)
             new_counts = ingest_images(manifest)
-            print(f"[INFO] Added — edible: {new_counts['edible']} | poisonous: {new_counts['poisonous']}", flush=True)
+            print(
+                f"[INFO] Added — edible: {new_counts['edible']} | "
+                f"poisonous: {new_counts['poisonous']} | "
+                f"not_mushroom: {new_counts['not_mushroom']}",
+                flush=True,
+            )
 
         # Run the training pipeline
         result = run_training()
 
         log_entry.update({
-            "status":           "done",
-            "finished_at":      datetime.utcnow().isoformat() + "Z",
-            "new_edible":       new_counts["edible"],
-            "new_poisonous":    new_counts["poisonous"],
-            "total_edible":     result["edible_count"],
-            "total_poisonous":  result["poisonous_count"],
-            "total_images":     result["total_images"],
-            "train_accuracy":   result["train_accuracy"],
-            "val_accuracy":     result["val_accuracy"],
+            "status":             "done",
+            "finished_at":        datetime.utcnow().isoformat() + "Z",
+            "new_edible":         new_counts["edible"],
+            "new_poisonous":      new_counts["poisonous"],
+            "new_not_mushroom":   new_counts["not_mushroom"],
+            "total_edible":       result["edible_count"],
+            "total_poisonous":    result["poisonous_count"],
+            "total_not_mushroom": result["not_mushroom_count"],
+            "total_images":       result["total_images"],
+            "train_accuracy":     result["train_accuracy"],
+            "val_accuracy":       result["val_accuracy"],
         })
 
         print("\n" + "=" * 50, flush=True)
-        print(f"✅  Retraining complete!", flush=True)
+        print("✅  Retraining complete!", flush=True)
         print(f"    Train accuracy : {result['train_accuracy']}%", flush=True)
         print(f"    Val   accuracy : {result['val_accuracy']}%", flush=True)
         print(f"    Total images   : {result['total_images']}", flush=True)

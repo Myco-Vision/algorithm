@@ -183,7 +183,7 @@ def retrain():
 
     Body fields:
         images[]   — one or more image files
-        labels[]   — matching label for each image ("edible" or "poisonous")
+        labels[]   — matching label for each image ("edible", "poisonous", or "not_mushroom")
 
     Header:
         X-Retrain-Key: <RETRAIN_API_KEY>
@@ -219,12 +219,12 @@ def retrain():
     # ── Save uploaded images and build the manifest ────────────────────────
     tmp_dir      = tempfile.mkdtemp(prefix="myco_retrain_")
     manifest     = []
-    saved_counts = {"edible": 0, "poisonous": 0}
+    saved_counts = {"edible": 0, "poisonous": 0, "not_mushroom": 0}
 
     try:
         for idx, (img_file, label) in enumerate(zip(images, labels)):
             label = label.lower().strip()
-            if label not in ("edible", "poisonous"):
+            if label not in ("edible", "poisonous", "not_mushroom"):
                 continue
             if not allowed_file(img_file.filename):
                 continue
@@ -263,6 +263,7 @@ def retrain():
         "state":            "running",
         "edible_queued":    saved_counts["edible"],
         "poisonous_queued": saved_counts["poisonous"],
+        "not_mushroom_queued":  saved_counts["not_mushroom"],
         "total_queued":     len(manifest),
     }), 202
 
