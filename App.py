@@ -27,8 +27,15 @@ LOG_PATH = BASE_DIR / "retrain_log.json"
 _DEFAULT_RETRAIN_KEY = "myco-retrain-secret"
 RETRAIN_KEY = os.environ.get("RETRAIN_API_KEY", _DEFAULT_RETRAIN_KEY)
 if RETRAIN_KEY == _DEFAULT_RETRAIN_KEY:
-    print("WARNING: RETRAIN_API_KEY is not set; using the built-in default key. "
-          "Set it before deploying.", file=sys.stderr)
+    if os.environ.get("FLASK_DEBUG") == "1":
+        print("WARNING: RETRAIN_API_KEY is not set; using the built-in default key "
+              "(allowed only because FLASK_DEBUG=1).", file=sys.stderr)
+    else:
+        # Fail fast: the default key is public, so /retrain would be open to anyone.
+        raise RuntimeError(
+            "RETRAIN_API_KEY is not set (or is the built-in default). "
+            "Set a strong random value, e.g. `openssl rand -hex 24`."
+        )
 
 RETRAIN_TIMEOUT = int(os.environ.get("RETRAIN_TIMEOUT_SECONDS", "3600"))
 
