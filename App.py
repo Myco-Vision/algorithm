@@ -69,6 +69,13 @@ def convert_to_webp(file) -> str:
     return tmp_path
 
 
+# ── Health check ───────────────────────────────────────────────────────────────
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"}), 200
+
+
 # ── Classify endpoint ──────────────────────────────────────────────────────────
 
 @app.route("/classify", methods=["POST"])

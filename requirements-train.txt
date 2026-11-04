@@ -1,0 +1,16 @@
+# Full environment for local development, training, evaluation and retraining.
+# (The deployed inference service uses the slim requirements.txt instead.)
+tensorflow==2.16.2
+numpy<2.0.0
+matplotlib
+scikit-learn
+pillow
+requests
+pandas
+seaborn
+mediapipe==0.10.14
+opencv-python
+scipy
+absl-py
+flask
+gunicorn

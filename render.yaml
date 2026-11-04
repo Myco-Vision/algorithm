@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: mycovision-ml
+    runtime: docker
+    plan: free
+    region: singapore
+    healthCheckPath: /health
+    envVars:
+      - key: RETRAIN_API_KEY
+        generateValue: true
