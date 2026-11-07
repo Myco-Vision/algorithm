@@ -37,7 +37,15 @@ def get_tensorflow():
     return _TF
 
 
+_ASSETS = None
+
+
 def load_assets():
+    """Load the model + label map once per process and reuse them."""
+    global _ASSETS
+    if _ASSETS is not None:
+        return _ASSETS
+
     if not MODEL_PATH.exists():
         raise PredictionError(f"Model file not found: {MODEL_PATH}")
     if not CLASSES_PATH.exists():
@@ -47,7 +55,8 @@ def load_assets():
     model = tf.keras.models.load_model(MODEL_PATH)
     class_indices = np.load(CLASSES_PATH, allow_pickle=True).item()
     labels_map = {value: key for key, value in class_indices.items()}
-    return model, labels_map
+    _ASSETS = (model, labels_map)
+    return _ASSETS
 
 
 def preprocess_image(image_path):

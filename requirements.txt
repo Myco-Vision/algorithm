@@ -1,12 +1,8 @@
-tensorflow==2.16.2
+# Slim, inference-only dependencies for deployment (Render / Docker).
+# App.py + predict.py only need these. For training/dev use requirements-train.txt.
+tensorflow-cpu==2.16.2
 numpy<2.0.0
-matplotlib
-scikit-learn
 pillow
-requests
-pandas
-seaborn
-mediapipe==0.10.14
-opencv-python
-scipy
 absl-py
+flask
+gunicorn
