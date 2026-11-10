@@ -1,11 +1,17 @@
 """
 iNaturalist Mushroom Image Downloader - Mindanao + Philippines + wider region
 =============================================================================
-Multi-target version of download_oyster_mushrooms.py.
+Downloads images for MycoVision's pre-configured mushroom species into
+`species_dataset/<Species_Folder>/` for training the species identification
+model (`train_species.py`).
 
-Targets (each goes to its own class folder):
-  oyster      -> Pleurotus ostreatus / P. pulmonarius          -> edible/
-  gymnopilus  -> genus Gymnopilus (all descendant species)     -> poisonous/
+Pre-configured targets:
+  termitomyces             -> Termitomyces (Mamuno)                   -> species_dataset/Termitomyces/
+  auricularia              -> Auricularia (Talingang Daga / Wood Ear) -> species_dataset/Auricularia/
+  oyster                   -> Pleurotus ostreatus / P. pulmonarius    -> species_dataset/Pleurotus_ostreatus/
+  amanita_virosa           -> Amanita virosa (Destroying Angel)       -> species_dataset/Amanita_virosa/
+  leucocoprinus_birnbaumii -> Leucocoprinus birnbaumii                -> species_dataset/Leucocoprinus_birnbaumii/
+  gymnopilus               -> genus Gymnopilus (Rustgill)             -> species_dataset/Gymnopilus/
 
 - Pass order per target: Mindanao -> Philippines -> nearby countries -> worldwide (capped)
 - Deduped by observation id within each target
@@ -13,17 +19,13 @@ Targets (each goes to its own class folder):
 - Skips already-downloaded images (safe to re-run)
 
 Usage:
-    python download_mushrooms.py                 # run all targets
-    python download_mushrooms.py gymnopilus      # run only Gymnopilus
-    python download_mushrooms.py oyster          # run only oyster
-
-Output:
-    mushroom_downloads/<target>/species_list.csv
-    mushroom_downloads/<target>/observations.csv
-    mushroom_downloads/download_log.txt
+    python download_mushrooms.py                           # run all 6 species targets
+    python download_mushrooms.py termitomyces auricularia  # run specific target(s)
+    python download_mushrooms.py oyster --cap 200          # cap worldwide pass to 200 obs
 """
 
 import csv
+import shutil
 import sys
 import time
 import logging
@@ -31,11 +33,15 @@ import requests
 from pathlib import Path
 from urllib.parse import urlparse
 
+from species_catalog import SPECIES_CATALOG
+
 # -- CONFIG -------------------------------------------------------------------
 
-DATASET_ROOT  = Path(r"C:\Users\Sui\Documents\MycoVision\algorithm\mushroom_dataset")
-EDIBLE_DIR    = DATASET_ROOT / "edible"
-POISONOUS_DIR = DATASET_ROOT / "poisonous"
+BASE_DIR            = Path(__file__).resolve().parent
+SPECIES_DATASET_DIR = BASE_DIR / "species_dataset"
+EDIBILITY_ROOT      = BASE_DIR / "mushroom_dataset"
+EDIBLE_DIR          = EDIBILITY_ROOT / "edible"
+POISONOUS_DIR       = EDIBILITY_ROOT / "poisonous"
 
 # (label, place name to resolve, fallback place_id or None, cap on new obs per pass or None)
 PLACES = [
@@ -47,34 +53,60 @@ PLACES = [
     ("Vietnam",     "Vietnam",     None, None),
     ("Taiwan",      "Taiwan",      None, None),
     ("India",       "India",       None, None),
-    ("Worldwide",   None,          None, 1500),
+    ("Worldwide",   None,          None, 300),
 ]
 
 TARGETS = {
-    # "oyster": {
-    #     "taxa":      ["Pleurotus ostreatus", "Pleurotus pulmonarius"],
-    #     "rank":      "species",
-    #     "class_dir": EDIBLE_DIR,
-    #     "places":    PLACES,
-    # },
+    "termitomyces": {
+        "folder":         "Termitomyces",
+        "taxa":           SPECIES_CATALOG["Termitomyces"]["taxa"],
+        "rank":           SPECIES_CATALOG["Termitomyces"]["rank"],
+        "classification": "edible",
+        "places":         PLACES,
+    },
+    "auricularia": {
+        "folder":         "Auricularia",
+        "taxa":           SPECIES_CATALOG["Auricularia"]["taxa"],
+        "rank":           SPECIES_CATALOG["Auricularia"]["rank"],
+        "classification": "edible",
+        "places":         PLACES,
+    },
+    "oyster": {
+        "folder":         "Pleurotus_ostreatus",
+        "taxa":           SPECIES_CATALOG["Pleurotus_ostreatus"]["taxa"],
+        "rank":           SPECIES_CATALOG["Pleurotus_ostreatus"]["rank"],
+        "classification": "edible",
+        "places":         PLACES,
+    },
+    "amanita_virosa": {
+        "folder":         "Amanita_virosa",
+        "taxa":           SPECIES_CATALOG["Amanita_virosa"]["taxa"],
+        "rank":           SPECIES_CATALOG["Amanita_virosa"]["rank"],
+        "classification": "poisonous",
+        "places":         PLACES,
+    },
+    "leucocoprinus_birnbaumii": {
+        "folder":         "Leucocoprinus_birnbaumii",
+        "taxa":           SPECIES_CATALOG["Leucocoprinus_birnbaumii"]["taxa"],
+        "rank":           SPECIES_CATALOG["Leucocoprinus_birnbaumii"]["rank"],
+        "classification": "poisonous",
+        "places":         PLACES,
+    },
     "gymnopilus": {
-        # Genus-level: iNaturalist includes all descendant species in the query.
-        # Labelled poisonous on purpose (safety bias): many species are bitter,
-        # some contain psilocybin. Folders are split per species for later review.
-        "taxa":      ["Gymnopilus"],
-        "rank":      "genus",
-        "class_dir": POISONOUS_DIR,
-        "places":    PLACES,
+        "folder":         "Gymnopilus",
+        "taxa":           SPECIES_CATALOG["Gymnopilus"]["taxa"],
+        "rank":           SPECIES_CATALOG["Gymnopilus"]["rank"],
+        "classification": "poisonous",
+        "places":         PLACES,
     },
 }
 
-QUALITIES           = ["research", "needs_id"]
-PER_PAGE            = 200
-SLEEP_BETWEEN       = 1.2
-IMG_SLEEP           = 0.4
-MAX_IMAGES_PER_OBS  = 3
-OUTPUT_DIR          = Path("mushroom_downloads")
-PER_SPECIES_FOLDERS = True       # False = drop all images flat into class_dir
+QUALITIES          = ["research", "needs_id"]
+PER_PAGE           = 200
+SLEEP_BETWEEN      = 1.2
+IMG_SLEEP          = 0.4
+MAX_IMAGES_PER_OBS = 3
+OUTPUT_DIR         = BASE_DIR / "mushroom_downloads"
 
 API_BASE = "https://api.inaturalist.org/v1"
 HEADERS  = {"User-Agent": "MycoVisionResearch/1.0 (academic project)"}
@@ -100,9 +132,6 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # -- HELPERS ------------------------------------------------------------------
-
-def safe_name(name: str) -> str:
-    return name.replace(" ", "_").replace("/", "-").replace("\\", "-")
 
 
 def best_image_url(photo: dict) -> str:
@@ -182,20 +211,25 @@ def download_image(url: str, dest: Path) -> str:
         return "failed"
 
 
-def count_images(folders) -> int:
-    """Count images in this target's own species folders only."""
-    return sum(1 for d in folders for f in d.rglob("*") if f.is_file())
+def count_images(folder: Path) -> int:
+    return sum(1 for f in folder.rglob("*") if f.is_file())
+
 
 # -- PER-TARGET RUN -----------------------------------------------------------
 
-def run_target(key: str, cfg: dict):
+def run_target(key: str, cfg: dict, also_copy_edibility: bool = False):
+    species_dir = SPECIES_DATASET_DIR / cfg["folder"]
+    species_dir.mkdir(parents=True, exist_ok=True)
+
+    edibility_dir = EDIBLE_DIR if cfg["classification"] == "edible" else POISONOUS_DIR
+    if also_copy_edibility:
+        edibility_dir.mkdir(parents=True, exist_ok=True)
+
     log.info("")
     log.info("=" * 60)
-    log.info(f"TARGET: {key}  ->  {cfg['class_dir']}")
+    log.info(f"TARGET: {key} ({cfg['classification']}) -> {species_dir}")
     log.info("=" * 60)
 
-    class_dir = cfg["class_dir"]
-    class_dir.mkdir(parents=True, exist_ok=True)
     target_out = OUTPUT_DIR / key
     target_out.mkdir(parents=True, exist_ok=True)
 
@@ -219,7 +253,6 @@ def run_target(key: str, cfg: dict):
 
     seen_obs_ids = set()
     species_stats = {}
-    species_dirs = set()
     obs_rows = []
     total_downloaded = total_skipped = total_failed = 0
 
@@ -265,13 +298,6 @@ def run_target(key: str, cfg: dict):
                     common_name  = taxon.get("preferred_common_name", "")
                     rank         = taxon.get("rank", "")
 
-                    if PER_SPECIES_FOLDERS:
-                        species_dir = class_dir / safe_name(species_name)
-                        species_dir.mkdir(parents=True, exist_ok=True)
-                    else:
-                        species_dir = class_dir
-                    species_dirs.add(species_dir)
-
                     if species_name not in species_stats:
                         species_stats[species_name] = {
                             "common_name": common_name,
@@ -303,6 +329,8 @@ def run_target(key: str, cfg: dict):
                         if result == "downloaded":
                             species_stats[species_name]["img_count"] += 1
                             total_downloaded += 1
+                            if also_copy_edibility:
+                                shutil.copy2(dest, edibility_dir / dest.name)
                             log.info(f"  Downloaded: {species_name} | obs {obs_id} img {i}")
                         elif result == "skipped":
                             species_stats[species_name]["img_count"] += 1
@@ -317,7 +345,6 @@ def run_target(key: str, cfg: dict):
                 if page * PER_PAGE >= (total_results or 0):
                     break
 
-                # iNaturalist API won't serve beyond 10,000 results per query
                 if page * PER_PAGE >= 10000:
                     log.warning("  Hit the API's 10,000-result limit for this query")
                     break
@@ -346,27 +373,29 @@ def run_target(key: str, cfg: dict):
     log.info(f"  Images downloaded   : {total_downloaded}")
     log.info(f"  Images skipped      : {total_skipped}")
     log.info(f"  Images failed       : {total_failed}")
-    log.info(f"  Images on disk (this target's folders): {count_images(species_dirs)}")
+    log.info(f"  Images in folder    : {count_images(species_dir)}")
     log.info(f"  CSVs                : {target_out.resolve()}")
+
 
 # -- MAIN ---------------------------------------------------------------------
 
 def main():
-    requested = [a.lower() for a in sys.argv[1:]] or list(TARGETS)
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    also_copy_edibility = "--sync-edibility" in sys.argv[1:]
+
+    requested = [a.lower() for a in args] or list(TARGETS)
     unknown = [r for r in requested if r not in TARGETS]
     if unknown:
         log.error(f"Unknown target(s): {unknown}. Choose from: {list(TARGETS)}")
         return
 
     for key in requested:
-        run_target(key, TARGETS[key])
+        run_target(key, TARGETS[key], also_copy_edibility=also_copy_edibility)
 
     log.info("")
     log.info("NEXT STEPS:")
-    log.info("  1. Review the new folders for bad photos (wrong subject, blurry, lookalikes)")
-    log.info("  2. Gymnopilus: needs_id observations may be misidentified; filter by")
-    log.info("     quality in observations.csv if you want cleaner poisonous labels")
-    log.info("  3. Merge into your classifier dataset")
+    log.info("  1. Review species_dataset/<Species>/ folders for bad photos")
+    log.info("  2. Train the species model: python train_species.py")
 
 
 if __name__ == "__main__":

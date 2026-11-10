@@ -27,6 +27,9 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+from PIL import ImageFile
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 BASE_DIR    = Path(__file__).resolve().parent
@@ -39,7 +42,7 @@ POISONOUS_DIR    = DATASET_DIR / "poisonous"
 NOT_MUSHROOM_DIR = DATASET_DIR / "not_mushroom"
 
 IMAGE_SIZE = (224, 224)
-BATCH_SIZE = 4
+BATCH_SIZE = 32
 EPOCHS     = 20
 
 VALID_LABELS = {"edible", "poisonous", "not_mushroom"}
@@ -126,10 +129,10 @@ def run_training() -> dict:
     import tensorflow as tf
     from tensorflow.keras import layers, models
 
-    # Count images per class for the log
-    edible_count       = len(list(EDIBLE_DIR.glob("*.*")))
-    poisonous_count    = len(list(POISONOUS_DIR.glob("*.*")))
-    not_mushroom_count = len(list(NOT_MUSHROOM_DIR.glob("*.*")))
+    # Count images per class for the log (including any species subfolders)
+    edible_count       = sum(1 for f in EDIBLE_DIR.rglob("*") if f.is_file())
+    poisonous_count    = sum(1 for f in POISONOUS_DIR.rglob("*") if f.is_file())
+    not_mushroom_count = sum(1 for f in NOT_MUSHROOM_DIR.rglob("*") if f.is_file())
     total_images       = edible_count + poisonous_count + not_mushroom_count
 
     print(
@@ -143,7 +146,7 @@ def run_training() -> dict:
     if edible_count == 0 or poisonous_count == 0 or not_mushroom_count == 0:
         raise ValueError("All 3 classes ('edible', 'poisonous', 'not_mushroom') must have at least one image.")
 
-    # ── Data generators ──────────────────────────────────────────────────────
+    # ── Data generators (80% augmented training / 20% clean validation) ──────
     augment = tf.keras.preprocessing.image.ImageDataGenerator(
         rescale=1.0 / 255,
         rotation_range=40,
@@ -153,6 +156,12 @@ def run_training() -> dict:
         zoom_range=0.2,
         horizontal_flip=True,
         fill_mode="nearest",
+        validation_split=0.2,
+    )
+
+    val_datagen = tf.keras.preprocessing.image.ImageDataGenerator(
+        rescale=1.0 / 255,
+        validation_split=0.2,
     )
 
     train_gen = augment.flow_from_directory(
@@ -160,15 +169,19 @@ def run_training() -> dict:
         target_size=IMAGE_SIZE,
         batch_size=BATCH_SIZE,
         class_mode="categorical",
+        subset="training",
         shuffle=True,
+        seed=42,
     )
 
-    val_gen = augment.flow_from_directory(
+    val_gen = val_datagen.flow_from_directory(
         str(DATASET_DIR),
         target_size=IMAGE_SIZE,
         batch_size=BATCH_SIZE,
         class_mode="categorical",
+        subset="validation",
         shuffle=False,
+        seed=42,
     )
 
     class_indices = train_gen.class_indices

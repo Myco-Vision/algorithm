@@ -98,3 +98,9 @@ venv.bak/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Large training image datasets (keep trained models in models/ tracked)
+species_dataset/
+mushroom_downloads/
+mushroom_dataset/edible/*/
+mushroom_dataset/poisonous/*/

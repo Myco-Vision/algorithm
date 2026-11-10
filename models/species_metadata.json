@@ -1,0 +1,23 @@
+{
+  "0": {
+    "key": "Gymnopilus",
+    "scientific_name": "Gymnopilus",
+    "common_name": "Rustgill",
+    "display_name": "Gymnopilus",
+    "classification": "poisonous"
+  },
+  "1": {
+    "key": "Pleurotus_ostreatus",
+    "scientific_name": "Pleurotus ostreatus",
+    "common_name": "Oyster Mushroom",
+    "display_name": "Pleurotus ostreatus",
+    "classification": "edible"
+  },
+  "2": {
+    "key": "Pleurotus_pulmonarius",
+    "scientific_name": "Pleurotus pulmonarius",
+    "common_name": "Phoenix Oyster",
+    "display_name": "Pleurotus pulmonarius",
+    "classification": "edible"
+  }
+}

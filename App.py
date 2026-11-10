@@ -13,6 +13,31 @@ from flask import Flask, request, jsonify
 from PIL import Image
 from werkzeug.utils import secure_filename
 
+# Ensure the algorithm directory is in sys.path so imports work regardless of CWD
+BASE_DIR = Path(__file__).resolve().parent
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
+# Load .env file if present
+def _load_env_file(path: Path):
+    if path.is_file():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    k = k.strip()
+                    v = v.strip().strip("'\"")
+                    if k not in os.environ:
+                        os.environ[k] = v
+        except Exception:
+            pass
+
+_load_env_file(BASE_DIR / ".env")
+_load_env_file(BASE_DIR.parent / ".env")
+
 from predict import predict_mushroom, PredictionError
 
 app = Flask(__name__)
@@ -21,21 +46,25 @@ app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # reject oversized uploads
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
 
 # ── Retrain state (shared between threads) ─────────────────────────────────────
-BASE_DIR = Path(__file__).resolve().parent
 LOG_PATH = BASE_DIR / "retrain_log.json"
 
 _DEFAULT_RETRAIN_KEY = "myco-retrain-secret"
 RETRAIN_KEY = os.environ.get("RETRAIN_API_KEY", _DEFAULT_RETRAIN_KEY)
 if RETRAIN_KEY == _DEFAULT_RETRAIN_KEY:
-    if os.environ.get("FLASK_DEBUG") == "1":
-        print("WARNING: RETRAIN_API_KEY is not set; using the built-in default key "
-              "(allowed only because FLASK_DEBUG=1).", file=sys.stderr)
-    else:
-        # Fail fast: the default key is public, so /retrain would be open to anyone.
+    is_prod = (
+        os.environ.get("RENDER") == "true"
+        or os.environ.get("FLASK_ENV") == "production"
+        or os.environ.get("APP_ENV") == "production"
+        or os.environ.get("ENVIRONMENT") == "production"
+    )
+    if is_prod:
+        # Fail fast in production: the default key is public, so /retrain would be open to anyone.
         raise RuntimeError(
             "RETRAIN_API_KEY is not set (or is the built-in default). "
             "Set a strong random value, e.g. `openssl rand -hex 24`."
         )
+    else:
+        print("WARNING: RETRAIN_API_KEY is not set; using the built-in default development key.", file=sys.stderr)
 
 RETRAIN_TIMEOUT = int(os.environ.get("RETRAIN_TIMEOUT_SECONDS", "3600"))
 
@@ -115,13 +144,17 @@ def classify():
 
     return jsonify(
         {
-            "species":               result["label"],
-            "result_name":           result["label"].capitalize(),
+            "species":               result["species"],
+            "scientific_name":       result["scientific_name"],
+            "common_name":           result["common_name"],
+            "result_name":           result["result_name"],
             "result_classification": result["label"],
             "confidence":            result["confidence_percent"],
             "confidence_level":      result["confidence_percent"],
+            "species_confidence":    result["species_confidence_percent"],
             "is_poisonous":          result["is_poisonous"],
             "raw_score":             result["raw_score"],
+            "species_raw_score":     result["species_raw_score"],
             "warning":               result["warning"],
         }
     ), 200

@@ -1,20 +1,24 @@
 import os
 import numpy as np
+from PIL import ImageFile
 import tensorflow as tf
-from tensorflow.keras import layers, models
+from tensorflow.keras import callbacks, layers, models
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 # --- CONFIGURATION ---
 IMAGE_SIZE = (224, 224)
-BATCH_SIZE = 4
-DATA_DIR = "mushroom_dataset"  # now needs 'edible', 'poisonous', AND 'not_mushroom' subfolders
+BATCH_SIZE = 32
+VALIDATION_SPLIT = 0.2
+DATA_DIR = "mushroom_dataset"  # needs 'edible', 'poisonous', AND 'not_mushroom' subfolders
 MODEL_DIR = "models"
 
 print("Checking dataset structure...")
 if not os.path.exists(DATA_DIR):
     raise FileNotFoundError(f"Could not find the dataset directory: '{DATA_DIR}'. Please create it and organize your photos.")
 
-# --- STEP 1: DATA AUGMENTATION AND LOADING ---
-print("Loading data and applying image augmentations...")
+# --- STEP 1: DATA AUGMENTATION AND 80/20 SPLIT ---
+print("Loading data (80% training with augmentations / 20% clean validation)...")
 
 train_datagen = tf.keras.preprocessing.image.ImageDataGenerator(
     rescale=1./255,
@@ -24,7 +28,14 @@ train_datagen = tf.keras.preprocessing.image.ImageDataGenerator(
     shear_range=0.2,
     zoom_range=0.2,
     horizontal_flip=True,
-    fill_mode='nearest'
+    fill_mode='nearest',
+    validation_split=VALIDATION_SPLIT,
+)
+
+# Clean rescaling only for validation so it matches real user uploads in predict.py
+val_datagen = tf.keras.preprocessing.image.ImageDataGenerator(
+    rescale=1./255,
+    validation_split=VALIDATION_SPLIT,
 )
 
 train_generator = train_datagen.flow_from_directory(
@@ -32,19 +43,24 @@ train_generator = train_datagen.flow_from_directory(
     target_size=IMAGE_SIZE,
     batch_size=BATCH_SIZE,
     class_mode='categorical',
-    shuffle=True
+    subset='training',
+    shuffle=True,
+    seed=42,
 )
 
-validation_generator = train_datagen.flow_from_directory(
+validation_generator = val_datagen.flow_from_directory(
     DATA_DIR,
     target_size=IMAGE_SIZE,
     batch_size=BATCH_SIZE,
     class_mode='categorical',
-    shuffle=False
+    subset='validation',
+    shuffle=False,
+    seed=42,
 )
 
 class_indices = train_generator.class_indices
 print(f"Class mapping detected: {class_indices}")
+print(f"Training samples: {train_generator.samples} | Validation samples: {validation_generator.samples}")
 
 
 # --- STEP 2: BUILD TRANSFER LEARNING MODEL ---
@@ -76,10 +92,19 @@ model.compile(
 print("Starting training loop...")
 epochs = 20
 
+has_val = validation_generator.samples > 0
+early_stop = callbacks.EarlyStopping(
+    monitor='val_accuracy' if has_val else 'accuracy',
+    patience=5,
+    restore_best_weights=True,
+    verbose=1,
+)
+
 history = model.fit(
     train_generator,
     epochs=epochs,
-    validation_data=validation_generator
+    validation_data=validation_generator if has_val else None,
+    callbacks=[early_stop],
 )
 
 
@@ -91,6 +116,11 @@ model.save(model_path)
 
 np.save(os.path.join(MODEL_DIR, "class_indices.npy"), class_indices)
 
-print("\n" + "="*40)
-print(f"Training Complete! Model saved to: {model_path}")
-print("="*40)
+best_train_acc = max(history.history.get("accuracy", [0.0])) * 100
+best_val_acc = max(history.history.get("val_accuracy", [best_train_acc / 100])) * 100
+
+print("\n" + "="*50)
+print(f"Training Complete! Best weights saved to: {model_path}")
+print(f"  Best Train Accuracy : {best_train_acc:.2f}%")
+print(f"  Best Val Accuracy   : {best_val_acc:.2f}%")
+print("="*50)
