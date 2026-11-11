@@ -1,8 +1,9 @@
-# Slim, inference-only dependencies for deployment (Render / Docker).
-# App.py + predict.py only need these. For training/dev use requirements-train.txt.
+# Slim runtime dependencies for deployment (Render / Docker).
+# Covers inference (App.py + predict.py) and live retraining (retrain.py).
 tensorflow-cpu==2.16.2
 numpy<2.0.0
 pillow
+scipy
 absl-py
 flask
 gunicorn
