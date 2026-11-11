@@ -37,7 +37,7 @@ def _load_env_file(path: Path):
 _load_env_file(BASE_DIR / ".env")
 _load_env_file(BASE_DIR.parent / ".env")
 
-from predict import predict_mushroom, PredictionError, unload_assets
+from predict import predict_mushroom, PredictionError, unload_assets, load_assets, load_species_assets
 from retrain import run_retrain
 
 app = Flask(__name__)
@@ -103,7 +103,45 @@ def convert_to_webp(file) -> str:
 
 @app.route("/health", methods=["GET"])
 def health():
+    if request.args.get("warm") in ("1", "true", "yes"):
+        with _retrain_lock:
+            is_retraining = _retrain_status["state"] == "running"
+        if is_retraining:
+            return jsonify({"status": "retraining", "warmed": False}), 200
+        try:
+            with _tf_lock:
+                load_assets()
+                species_loaded = load_species_assets() is not None
+            return jsonify({"status": "ok", "warmed": True, "species_loaded": species_loaded}), 200
+        except Exception as exc:
+            return jsonify({"status": "error", "warmed": False, "detail": str(exc)}), 500
     return jsonify({"status": "ok"}), 200
+
+
+@app.route("/refresh", methods=["POST"])
+def refresh_models():
+    """Force-reload Stage-1 and Stage-2 inference models on demand."""
+    auth_error = _verify_retrain_key()
+    if auth_error:
+        return auth_error
+
+    with _retrain_lock:
+        if _retrain_status["state"] == "running":
+            return jsonify({"message": "Retraining is currently in progress."}), 503
+
+    try:
+        with _tf_lock:
+            unload_assets()
+            load_assets()
+            species_loaded = load_species_assets() is not None
+        return jsonify({
+            "status":         "ready",
+            "message":        "ML inference models refreshed and ready for new scans.",
+            "stage1_loaded":  True,
+            "species_loaded": species_loaded,
+        }), 200
+    except Exception as exc:
+        return jsonify({"message": f"Failed to refresh ML models: {exc}"}), 500
 
 
 # ── Classify endpoint ──────────────────────────────────────────────────────────
