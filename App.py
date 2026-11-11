@@ -2,7 +2,6 @@ import hmac
 import json
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 from datetime import datetime, timezone
@@ -38,7 +37,8 @@ def _load_env_file(path: Path):
 _load_env_file(BASE_DIR / ".env")
 _load_env_file(BASE_DIR.parent / ".env")
 
-from predict import predict_mushroom, PredictionError
+from predict import predict_mushroom, PredictionError, unload_assets
+from retrain import run_retrain
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # reject oversized uploads (100 MB)
@@ -69,6 +69,7 @@ if RETRAIN_KEY == _DEFAULT_RETRAIN_KEY:
 RETRAIN_TIMEOUT = int(os.environ.get("RETRAIN_TIMEOUT_SECONDS", "3600"))
 
 _retrain_lock = Lock()
+_tf_lock = Lock()
 _retrain_status = {
     "state":       "idle",          # idle | running | done | failed
     "started_at":  None,
@@ -109,6 +110,12 @@ def health():
 
 @app.route("/classify", methods=["POST"])
 def classify():
+    with _retrain_lock:
+        if _retrain_status["state"] == "running":
+            return jsonify({
+                "message": "AI model retraining is in progress. Please try scanning again in a minute."
+            }), 503
+
     if "image" not in request.files:
         return jsonify({"message": "No image provided."}), 400
 
@@ -121,7 +128,8 @@ def classify():
 
     try:
         tmp_path = convert_to_webp(file)
-        result = predict_mushroom(tmp_path)
+        with _tf_lock:
+            result = predict_mushroom(tmp_path)
 
     except PredictionError as exc:
         return jsonify({"message": str(exc)}), 422
@@ -209,56 +217,29 @@ def _finalize_failed_log(error_msg: str):
         pass
 
 
-def _run_retrain_in_background(tmp_dir: str, manifest_path: str):
-    """Executed in a background thread — calls retrain.py as a subprocess."""
-    retrain_script = BASE_DIR / "retrain.py"
-
+def _run_retrain_in_background(tmp_dir: str, manifest: list, started_at: str):
+    """Executed in a background thread — unloads inference models and retrains in-process."""
     try:
-        result = subprocess.run(
-            [sys.executable, str(retrain_script), "--manifest", manifest_path],
-            capture_output=True,
-            text=True,
-            cwd=str(BASE_DIR),
-            timeout=RETRAIN_TIMEOUT,
-        )
+        with _tf_lock:
+            unload_assets()
+            last_log = run_retrain(manifest=manifest, started_at=started_at)
 
-        if result.returncode == 0:
-            # Pull the last log entry written by retrain.py
-            last_log = None
-            if LOG_PATH.exists():
-                try:
-                    entries = json.loads(LOG_PATH.read_text())
-                    last_log = entries[0] if entries else None
-                except Exception:
-                    pass
-
-            with _retrain_lock:
-                _retrain_status.update({
-                    "state":       "done",
-                    "finished_at": now_iso(),
-                    "error":       None,
-                    "last_result": last_log,
-                })
-        else:
-            err_detail = (result.stderr or "").strip()[-1000:]
-            if not err_detail:
-                err_detail = f"Retrain process exited with code {result.returncode} (may have run out of memory)."
-            _finalize_failed_log(err_detail)
-            with _retrain_lock:
-                _retrain_status.update({
-                    "state":       "failed",
-                    "finished_at": now_iso(),
-                    "error":       err_detail,
-                    "last_result": None,
-                })
+        with _retrain_lock:
+            _retrain_status.update({
+                "state":       "done",
+                "finished_at": now_iso(),
+                "error":       None,
+                "last_result": last_log,
+            })
 
     except Exception as exc:
-        _finalize_failed_log(str(exc))
+        err_detail = str(exc)[-1000:] or "Unknown error"
+        _finalize_failed_log(err_detail)
         with _retrain_lock:
             _retrain_status.update({
                 "state":       "failed",
                 "finished_at": now_iso(),
-                "error":       str(exc),
+                "error":       err_detail,
                 "last_result": None,
             })
     finally:
@@ -330,15 +311,11 @@ def retrain():
         if not manifest:
             raise ValueError("No valid images after filtering.")
 
-        manifest_file = os.path.join(tmp_dir, "manifest.json")
-        with open(manifest_file, "w") as f:
-            json.dump(manifest, f)
-
         _record_log_start(_retrain_status["started_at"], saved_counts)
 
         thread = Thread(
             target=_run_retrain_in_background,
-            args=(tmp_dir, manifest_file),
+            args=(tmp_dir, manifest, _retrain_status["started_at"]),
             daemon=True,
         )
         thread.start()

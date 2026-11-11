@@ -18,12 +18,13 @@ Manifest format:
 """
 
 import argparse
+import gc
 import json
 import os
 import shutil
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -42,8 +43,8 @@ POISONOUS_DIR    = DATASET_DIR / "poisonous"
 NOT_MUSHROOM_DIR = DATASET_DIR / "not_mushroom"
 
 IMAGE_SIZE = (224, 224)
-BATCH_SIZE = 32
-EPOCHS     = 20
+BATCH_SIZE = int(os.environ.get("RETRAIN_BATCH_SIZE", "8"))
+EPOCHS     = int(os.environ.get("RETRAIN_EPOCHS", "10"))
 
 VALID_LABELS = {"edible", "poisonous", "not_mushroom"}
 
@@ -131,7 +132,7 @@ def run_training() -> dict:
     """
     os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
     import tensorflow as tf
-    from tensorflow.keras import layers, models
+    from tensorflow.keras import callbacks, layers, models
 
     # Count images per class for the log (including any species subfolders)
     edible_count       = sum(1 for f in EDIBLE_DIR.rglob("*") if f.is_file())
@@ -168,109 +169,116 @@ def run_training() -> dict:
         validation_split=0.2,
     )
 
-    train_gen = augment.flow_from_directory(
-        str(DATASET_DIR),
-        target_size=IMAGE_SIZE,
-        batch_size=BATCH_SIZE,
-        class_mode="categorical",
-        subset="training",
-        shuffle=True,
-        seed=42,
-    )
+    model = None
+    base_model = None
+    train_gen = None
+    val_gen = None
 
-    val_gen = val_datagen.flow_from_directory(
-        str(DATASET_DIR),
-        target_size=IMAGE_SIZE,
-        batch_size=BATCH_SIZE,
-        class_mode="categorical",
-        subset="validation",
-        shuffle=False,
-        seed=42,
-    )
+    try:
+        train_gen = augment.flow_from_directory(
+            str(DATASET_DIR),
+            target_size=IMAGE_SIZE,
+            batch_size=BATCH_SIZE,
+            class_mode="categorical",
+            subset="training",
+            shuffle=True,
+            seed=42,
+        )
 
-    class_indices = train_gen.class_indices
-    num_classes = len(class_indices)
-    print(f"[INFO] Class mapping: {class_indices} ({num_classes} classes)", flush=True)
+        val_gen = val_datagen.flow_from_directory(
+            str(DATASET_DIR),
+            target_size=IMAGE_SIZE,
+            batch_size=BATCH_SIZE,
+            class_mode="categorical",
+            subset="validation",
+            shuffle=False,
+            seed=42,
+        )
 
-    if num_classes != 3:
-        raise ValueError(f"Expected 3 classes in dataset, but found {num_classes}: {class_indices}")
+        class_indices = train_gen.class_indices
+        num_classes = len(class_indices)
+        print(f"[INFO] Class mapping: {class_indices} ({num_classes} classes)", flush=True)
 
-    # ── Model ────────────────────────────────────────────────────────────────
-    base_model = tf.keras.applications.MobileNetV2(
-        input_shape=(224, 224, 3),
-        include_top=False,
-        weights="imagenet",
-    )
-    base_model.trainable = False  # freeze pre-trained weights
+        if num_classes != 3:
+            raise ValueError(f"Expected 3 classes in dataset, but found {num_classes}: {class_indices}")
 
-    model = models.Sequential([
-        base_model,
-        layers.GlobalAveragePooling2D(),
-        layers.Dense(64, activation="relu"),
-        layers.Dropout(0.5),
-        layers.Dense(num_classes, activation="softmax"),
-    ])
+        # ── Model ────────────────────────────────────────────────────────────────
+        base_model = tf.keras.applications.MobileNetV2(
+            input_shape=(224, 224, 3),
+            include_top=False,
+            weights="imagenet",
+        )
+        base_model.trainable = False  # freeze pre-trained weights
 
-    model.compile(
-        optimizer="adam",
-        loss="categorical_crossentropy",
-        metrics=["accuracy"],
-    )
+        model = models.Sequential([
+            base_model,
+            layers.GlobalAveragePooling2D(),
+            layers.Dense(64, activation="relu"),
+            layers.Dropout(0.5),
+            layers.Dense(num_classes, activation="softmax"),
+        ])
 
-    # ── Training ─────────────────────────────────────────────────────────────
-    print("[INFO] Starting training loop…", flush=True)
-    history = model.fit(
-        train_gen,
-        epochs=EPOCHS,
-        validation_data=val_gen,
-        verbose=1,
-    )
+        model.compile(
+            optimizer="adam",
+            loss="categorical_crossentropy",
+            metrics=["accuracy"],
+        )
 
-    final_accuracy     = float(history.history["accuracy"][-1])
-    final_val_accuracy = float(history.history.get("val_accuracy", [final_accuracy])[-1])
+        # ── Training ─────────────────────────────────────────────────────────────
+        has_val = val_gen.samples > 0
+        early_stop = callbacks.EarlyStopping(
+            monitor="val_accuracy" if has_val else "accuracy",
+            patience=3,
+            restore_best_weights=True,
+            verbose=1,
+        )
 
-    # ── Save outputs ─────────────────────────────────────────────────────────
-    MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    model_path   = MODEL_DIR / "mushroom_image_model.h5"
-    classes_path = MODEL_DIR / "class_indices.npy"
+        print("[INFO] Starting training loop…", flush=True)
+        history = model.fit(
+            train_gen,
+            epochs=EPOCHS,
+            validation_data=val_gen if has_val else None,
+            callbacks=[early_stop],
+            verbose=1,
+        )
 
-    model.save(str(model_path))
-    np.save(str(classes_path), class_indices)
+        final_accuracy     = float(history.history["accuracy"][-1])
+        final_val_accuracy = float(history.history.get("val_accuracy", [final_accuracy])[-1])
 
-    print(f"\n[DONE] Model saved → {model_path}", flush=True)
+        # ── Save outputs ─────────────────────────────────────────────────────────
+        MODEL_DIR.mkdir(parents=True, exist_ok=True)
+        model_path   = MODEL_DIR / "mushroom_image_model.h5"
+        classes_path = MODEL_DIR / "class_indices.npy"
 
-    return {
-        "edible_count":       edible_count,
-        "poisonous_count":    poisonous_count,
-        "not_mushroom_count": not_mushroom_count,
-        "total_images":       total_images,
-        "train_accuracy":     round(final_accuracy * 100, 2),
-        "val_accuracy":       round(final_val_accuracy * 100, 2),
-    }
+        model.save(str(model_path))
+        np.save(str(classes_path), class_indices)
+
+        print(f"\n[DONE] Model saved → {model_path}", flush=True)
+
+        return {
+            "edible_count":       edible_count,
+            "poisonous_count":    poisonous_count,
+            "not_mushroom_count": not_mushroom_count,
+            "total_images":       total_images,
+            "train_accuracy":     round(final_accuracy * 100, 2),
+            "val_accuracy":       round(final_val_accuracy * 100, 2),
+        }
+    finally:
+        del model, base_model, train_gen, val_gen
+        tf.keras.backend.clear_session()
+        gc.collect()
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 
-def main():
-    parser = argparse.ArgumentParser(description="Myco-Vision AI Retraining Script")
-    parser.add_argument(
-        "--manifest",
-        required=False,
-        help="Path to JSON manifest file listing images to add before retraining.",
-    )
-    args = parser.parse_args()
-
-    started_at = datetime.utcnow().isoformat() + "Z"
-    log_entry  = {"started_at": started_at, "status": "failed", "error": None}
+def run_retrain(manifest: list | None = None, started_at: str | None = None) -> dict:
+    """Ingest optional manifest images, run training, and record the log entry."""
+    run_started = started_at or (datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
+    log_entry   = {"started_at": run_started, "status": "failed", "error": None}
 
     try:
-        # Optional: ingest new images from manifest
         new_counts = {"edible": 0, "poisonous": 0, "not_mushroom": 0}
-        if args.manifest:
-            manifest_path = Path(args.manifest)
-            if not manifest_path.exists():
-                raise FileNotFoundError(f"Manifest not found: {manifest_path}")
-            manifest = json.loads(manifest_path.read_text())
+        if manifest:
             print(f"[INFO] Manifest has {len(manifest)} image(s).", flush=True)
             new_counts = ingest_images(manifest)
             print(
@@ -280,12 +288,11 @@ def main():
                 flush=True,
             )
 
-        # Run the training pipeline
         result = run_training()
 
         log_entry.update({
             "status":             "done",
-            "finished_at":        datetime.utcnow().isoformat() + "Z",
+            "finished_at":        datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "new_edible":         new_counts["edible"],
             "new_poisonous":      new_counts["poisonous"],
             "new_not_mushroom":   new_counts["not_mushroom"],
@@ -297,6 +304,8 @@ def main():
             "val_accuracy":       result["val_accuracy"],
         })
 
+        append_log(log_entry)
+
         print("\n" + "=" * 50, flush=True)
         print("✅  Retraining complete!", flush=True)
         print(f"    Train accuracy : {result['train_accuracy']}%", flush=True)
@@ -304,14 +313,37 @@ def main():
         print(f"    Total images   : {result['total_images']}", flush=True)
         print("=" * 50, flush=True)
 
+        return log_entry
+
     except Exception as exc:
+        log_entry["finished_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         log_entry["error"] = str(exc)
         print(f"\n[ERROR] Retraining failed: {exc}", file=sys.stderr, flush=True)
         append_log(log_entry)
-        return 1
+        raise
 
-    append_log(log_entry)
-    return 0
+
+def main():
+    parser = argparse.ArgumentParser(description="Myco-Vision AI Retraining Script")
+    parser.add_argument(
+        "--manifest",
+        required=False,
+        help="Path to JSON manifest file listing images to add before retraining.",
+    )
+    args = parser.parse_args()
+
+    try:
+        manifest = None
+        if args.manifest:
+            manifest_path = Path(args.manifest)
+            if not manifest_path.exists():
+                raise FileNotFoundError(f"Manifest not found: {manifest_path}")
+            manifest = json.loads(manifest_path.read_text())
+
+        run_retrain(manifest=manifest)
+        return 0
+    except Exception:
+        return 1
 
 
 if __name__ == "__main__":

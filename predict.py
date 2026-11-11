@@ -1,4 +1,5 @@
 import argparse
+import gc
 import json
 import os
 import sys
@@ -135,6 +136,18 @@ def load_species_assets():
     _SPECIES_ASSETS = (species_model, species_info_map)
     _SPECIES_ASSETS_MTIME = current_mtime
     return _SPECIES_ASSETS
+
+
+def unload_assets():
+    """Release cached TensorFlow/Keras models from RAM before retraining."""
+    global _ASSETS, _ASSETS_MTIME, _SPECIES_ASSETS, _SPECIES_ASSETS_MTIME
+    _ASSETS = None
+    _ASSETS_MTIME = None
+    _SPECIES_ASSETS = None
+    _SPECIES_ASSETS_MTIME = None
+    if _TF is not None:
+        _TF.keras.backend.clear_session()
+    gc.collect()
 
 
 def preprocess_image(image_path):
