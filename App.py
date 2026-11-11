@@ -170,6 +170,45 @@ def _verify_retrain_key():
     return None
 
 
+def _record_log_start(started_at: str, saved_counts: dict):
+    """Prepend a 'running' entry to retrain_log.json as soon as a job is queued."""
+    try:
+        entries = json.loads(LOG_PATH.read_text()) if LOG_PATH.exists() else []
+        if not isinstance(entries, list):
+            entries = []
+    except Exception:
+        entries = []
+
+    entry = {
+        "started_at":       started_at,
+        "status":           "running",
+        "error":            None,
+        "new_edible":       saved_counts.get("edible", 0),
+        "new_poisonous":    saved_counts.get("poisonous", 0),
+        "new_not_mushroom": saved_counts.get("not_mushroom", 0),
+    }
+    entries.insert(0, entry)
+    try:
+        LOG_PATH.write_text(json.dumps(entries[:20], indent=2))
+    except Exception:
+        pass
+
+
+def _finalize_failed_log(error_msg: str):
+    """Ensure killed/crashed subprocesses still update the 'running' log row to 'failed'."""
+    try:
+        entries = json.loads(LOG_PATH.read_text()) if LOG_PATH.exists() else []
+        if not isinstance(entries, list) or not entries:
+            return
+        if isinstance(entries[0], dict) and entries[0].get("status") == "running":
+            entries[0]["status"] = "failed"
+            entries[0]["finished_at"] = now_iso()
+            entries[0]["error"] = error_msg
+            LOG_PATH.write_text(json.dumps(entries[:20], indent=2))
+    except Exception:
+        pass
+
+
 def _run_retrain_in_background(tmp_dir: str, manifest_path: str):
     """Executed in a background thread — calls retrain.py as a subprocess."""
     retrain_script = BASE_DIR / "retrain.py"
@@ -201,15 +240,20 @@ def _run_retrain_in_background(tmp_dir: str, manifest_path: str):
                     "last_result": last_log,
                 })
         else:
+            err_detail = (result.stderr or "").strip()[-1000:]
+            if not err_detail:
+                err_detail = f"Retrain process exited with code {result.returncode} (may have run out of memory)."
+            _finalize_failed_log(err_detail)
             with _retrain_lock:
                 _retrain_status.update({
                     "state":       "failed",
                     "finished_at": now_iso(),
-                    "error":       (result.stderr or "")[-1000:] or "Unknown error",
+                    "error":       err_detail,
                     "last_result": None,
                 })
 
     except Exception as exc:
+        _finalize_failed_log(str(exc))
         with _retrain_lock:
             _retrain_status.update({
                 "state":       "failed",
@@ -289,6 +333,8 @@ def retrain():
         manifest_file = os.path.join(tmp_dir, "manifest.json")
         with open(manifest_file, "w") as f:
             json.dump(manifest, f)
+
+        _record_log_start(_retrain_status["started_at"], saved_counts)
 
         thread = Thread(
             target=_run_retrain_in_background,

@@ -65,7 +65,11 @@ def save_log(entries: list):
 
 def append_log(entry: dict):
     entries = load_log()
-    entries.insert(0, entry)          # newest first
+    # Replace the active "running" placeholder written by App.py when present
+    if entries and isinstance(entries[0], dict) and entries[0].get("status") == "running":
+        entries[0] = entry
+    else:
+        entries.insert(0, entry)      # newest first
     entries = entries[:20]            # keep last 20 runs
     save_log(entries)
 
