@@ -84,7 +84,7 @@ def load_assets():
         return _ASSETS
 
     tf = get_tensorflow()
-    model = tf.keras.models.load_model(MODEL_PATH)
+    model = tf.keras.models.load_model(MODEL_PATH, compile=False)
     class_indices = np.load(CLASSES_PATH, allow_pickle=True).item()
     labels_map = {int(value): str(key) for key, value in class_indices.items()}
     _ASSETS = (model, labels_map)
@@ -116,7 +116,7 @@ def load_species_assets():
         return _SPECIES_ASSETS
 
     tf = get_tensorflow()
-    species_model = tf.keras.models.load_model(SPECIES_MODEL_PATH)
+    species_model = tf.keras.models.load_model(SPECIES_MODEL_PATH, compile=False)
     species_indices = np.load(SPECIES_CLASSES_PATH, allow_pickle=True).item()
 
     saved_meta = {}
