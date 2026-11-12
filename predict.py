@@ -230,7 +230,7 @@ def predict_species(image_batch, edibility_label: str | None = None) -> dict | N
     }
 
 
-def predict_mushroom(image_path):
+def predict_mushroom(image_path, detect_only=False):
     image_batch, resolved_image_path = preprocess_image(image_path)
     model, labels_map = load_assets()
 
@@ -240,6 +240,15 @@ def predict_mushroom(image_path):
     stage1_confidence = float(predictions[predicted_index])
     label = labels_map.get(predicted_index, "unknown")
     is_mushroom = label.lower() != "not_mushroom"
+
+    if detect_only:
+        return {
+            "ok":           True,
+            "image":        str(resolved_image_path),
+            "is_mushroom":  is_mushroom,
+            "status_label": "subject is mushroom" if is_mushroom else "subject not mushroom",
+            "threshold":    THRESHOLD,
+        }
 
     species_result = None
     if is_mushroom:

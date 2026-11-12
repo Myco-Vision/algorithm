@@ -146,8 +146,12 @@ def refresh_models():
 
 # ── Classify endpoint ──────────────────────────────────────────────────────────
 
-@app.route("/classify", methods=["POST"])
-def classify():
+def _is_truthy(val) -> bool:
+    return str(val or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _run_image_inference(detect_only: bool = False):
+    """Handle image upload validation and run either detection-only or full classification."""
     with _retrain_lock:
         if _retrain_status["state"] == "running":
             return jsonify({
@@ -167,7 +171,7 @@ def classify():
     try:
         tmp_path = convert_to_webp(file)
         with _tf_lock:
-            result = predict_mushroom(tmp_path)
+            result = predict_mushroom(tmp_path, detect_only=detect_only)
 
     except PredictionError as exc:
         return jsonify({"message": str(exc)}), 422
@@ -176,6 +180,14 @@ def classify():
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
+
+    if detect_only:
+        return jsonify(
+            {
+                "is_mushroom":  bool(result["is_mushroom"]),
+                "status_label": result["status_label"],
+            }
+        ), 200
 
     if not result["is_mushroom"]:
         return jsonify(
@@ -204,6 +216,18 @@ def classify():
             "warning":               result["warning"],
         }
     ), 200
+
+
+@app.route("/detect", methods=["POST"])
+def detect():
+    """Check whether the uploaded image subject is a mushroom without running species/edibility classification."""
+    return _run_image_inference(detect_only=True)
+
+
+@app.route("/classify", methods=["POST"])
+def classify():
+    detect_only = _is_truthy(request.args.get("detect_only")) or _is_truthy(request.form.get("detect_only"))
+    return _run_image_inference(detect_only=detect_only)
 
 
 # ── Retrain endpoints ──────────────────────────────────────────────────────────
