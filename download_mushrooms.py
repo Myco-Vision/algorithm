@@ -38,7 +38,6 @@ from species_catalog import SPECIES_CATALOG
 # -- CONFIG -------------------------------------------------------------------
 
 BASE_DIR            = Path(__file__).resolve().parent
-SPECIES_DATASET_DIR = BASE_DIR / "species_dataset"
 EDIBILITY_ROOT      = BASE_DIR / "mushroom_dataset"
 EDIBLE_DIR          = EDIBILITY_ROOT / "edible"
 POISONOUS_DIR       = EDIBILITY_ROOT / "poisonous"
@@ -217,13 +216,10 @@ def count_images(folder: Path) -> int:
 
 # -- PER-TARGET RUN -----------------------------------------------------------
 
-def run_target(key: str, cfg: dict, also_copy_edibility: bool = False):
-    species_dir = SPECIES_DATASET_DIR / cfg["folder"]
-    species_dir.mkdir(parents=True, exist_ok=True)
-
+def run_target(key: str, cfg: dict):
     edibility_dir = EDIBLE_DIR if cfg["classification"] == "edible" else POISONOUS_DIR
-    if also_copy_edibility:
-        edibility_dir.mkdir(parents=True, exist_ok=True)
+    species_dir = edibility_dir / cfg["folder"]
+    species_dir.mkdir(parents=True, exist_ok=True)
 
     log.info("")
     log.info("=" * 60)
@@ -329,8 +325,6 @@ def run_target(key: str, cfg: dict, also_copy_edibility: bool = False):
                         if result == "downloaded":
                             species_stats[species_name]["img_count"] += 1
                             total_downloaded += 1
-                            if also_copy_edibility:
-                                shutil.copy2(dest, edibility_dir / dest.name)
                             log.info(f"  Downloaded: {species_name} | obs {obs_id} img {i}")
                         elif result == "skipped":
                             species_stats[species_name]["img_count"] += 1
@@ -381,7 +375,6 @@ def run_target(key: str, cfg: dict, also_copy_edibility: bool = False):
 
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    also_copy_edibility = "--sync-edibility" in sys.argv[1:]
 
     requested = [a.lower() for a in args] or list(TARGETS)
     unknown = [r for r in requested if r not in TARGETS]
@@ -390,12 +383,12 @@ def main():
         return
 
     for key in requested:
-        run_target(key, TARGETS[key], also_copy_edibility=also_copy_edibility)
+        run_target(key, TARGETS[key])
 
     log.info("")
     log.info("NEXT STEPS:")
-    log.info("  1. Review species_dataset/<Species>/ folders for bad photos")
-    log.info("  2. Train the species model: python train_species.py")
+    log.info("  1. Review mushroom_dataset/{edible,poisonous}/<Species>/ folders for bad photos")
+    log.info("  2. Train both models: python train.py && python train_species.py")
 
 
 if __name__ == "__main__":

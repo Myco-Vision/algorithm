@@ -2,13 +2,13 @@
 species_catalog.py — Canonical species metadata & dynamic folder resolution
 ============================================================================
 Defines the pre-configured mushroom species (matching SpeciesSeeder.php and
-download_mushrooms.py) and resolves metadata for any custom species subfolder
-added inside `species_dataset/`.
+download_mushrooms.py) and resolves metadata for any species subfolder placed
+inside `mushroom_dataset/edible/<Species>` or `mushroom_dataset/poisonous/<Species>`.
 """
 
 from pathlib import Path
 
-# Pre-configured species keyed by their subfolder name in `species_dataset/`
+# Pre-configured species keyed by their subfolder name inside mushroom_dataset/{edible,poisonous}/
 SPECIES_CATALOG: dict[str, dict] = {
     "Termitomyces": {
         "scientific_name": "Termitomyces",
@@ -68,11 +68,12 @@ _NORMALIZED_LOOKUP = {
 }
 
 
-def get_species_info(folder_name: str) -> dict:
+def get_species_info(folder_name: str, parent_classification: str | None = None) -> dict:
     """
-    Resolve metadata for a species folder name in `species_dataset/`.
+    Resolve metadata for a species folder name inside `mushroom_dataset/{edible,poisonous}/`.
     If the folder matches a pre-configured species, returns its full record.
-    Otherwise, dynamically constructs metadata from the folder name.
+    Otherwise, dynamically constructs metadata from the folder name and its parent
+    classification ('edible' or 'poisonous').
     """
     raw = folder_name.strip()
     norm = raw.lower().replace(" ", "_")
@@ -86,10 +87,10 @@ def get_species_info(folder_name: str) -> dict:
             "scientific_name": scientific,
             "common_name":     common,
             "display_name":    scientific,
-            "classification":  meta["classification"],
+            "classification":  parent_classification or meta["classification"],
         }
 
-    # Dynamic fallback for any new subfolder added to species_dataset/
+    # Dynamic fallback for any new subfolder added to mushroom_dataset/{edible,poisonous}/
     human_name = raw.replace("_", " ").replace("-", " ").strip()
     if human_name:
         human_name = human_name[0].upper() + human_name[1:]
@@ -101,16 +102,19 @@ def get_species_info(folder_name: str) -> dict:
         "scientific_name": human_name,
         "common_name":     human_name,
         "display_name":    human_name,
-        "classification":  None,
+        "classification":  parent_classification,
     }
 
 
-def ensure_species_folders(species_dataset_dir: Path) -> list[Path]:
-    """Create the default species subfolders inside `species_dataset/` if missing."""
-    species_dataset_dir.mkdir(parents=True, exist_ok=True)
+def ensure_species_folders(mushroom_dataset_dir: Path) -> list[Path]:
+    """
+    Ensure the default species subfolders exist inside
+    `mushroom_dataset/edible/<Species>` and `mushroom_dataset/poisonous/<Species>`.
+    """
     created = []
-    for folder_name in SPECIES_CATALOG:
-        folder = species_dataset_dir / folder_name
+    for folder_name, meta in SPECIES_CATALOG.items():
+        cls_folder = "edible" if meta["classification"] == "edible" else "poisonous"
+        folder = mushroom_dataset_dir / cls_folder / folder_name
         folder.mkdir(parents=True, exist_ok=True)
         created.append(folder)
     return created
