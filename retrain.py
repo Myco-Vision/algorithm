@@ -278,6 +278,18 @@ def run_training() -> dict:
         model.save(str(model_path))
         np.save(str(classes_path), class_indices)
 
+        # Sync to persistent directory if running in a container with a volume mounted (e.g. Modal)
+        persisted_dir = Path("/app/models_persisted")
+        if persisted_dir.exists():
+            try:
+                shutil.copy2(model_path, persisted_dir / model_path.name)
+                shutil.copy2(classes_path, persisted_dir / classes_path.name)
+                if LOG_PATH.exists():
+                    shutil.copy2(LOG_PATH, persisted_dir / LOG_PATH.name)
+                print("[DONE] Model weights and logs persisted to /app/models_persisted.", flush=True)
+            except Exception as e:
+                print(f"[WARN] Persistent storage sync note: {e}", flush=True)
+
         print(f"\n[DONE] Model saved → {model_path}", flush=True)
 
         return {
