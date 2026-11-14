@@ -1,8 +1,20 @@
 import os
+import sys
+from pathlib import Path
 import numpy as np
 from PIL import ImageFile
 import tensorflow as tf
 from tensorflow.keras import callbacks, layers, models
+
+# Ensure algorithm directory is in sys.path
+BASE_DIR = Path(__file__).resolve().parent
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
+try:
+    from augmentations import field_photometry_and_occlusion
+except ImportError:
+    from .augmentations import field_photometry_and_occlusion
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -27,8 +39,11 @@ train_datagen = tf.keras.preprocessing.image.ImageDataGenerator(
     height_shift_range=0.2,
     shear_range=0.2,
     zoom_range=0.2,
+    brightness_range=[0.80, 1.25],
     horizontal_flip=True,
-    fill_mode='nearest',
+    vertical_flip=False,
+    fill_mode='reflect',
+    preprocessing_function=field_photometry_and_occlusion,
     validation_split=VALIDATION_SPLIT,
 )
 

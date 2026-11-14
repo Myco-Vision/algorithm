@@ -6,6 +6,16 @@ Accepts a JSON manifest of image paths + labels, copies them into
 mushroom_dataset/, then runs MobileNetV2 fine-tuning for 3-class classification
 (edible, not_mushroom, poisonous).
 
+Augmentation Pipeline:
+    Uses the exact unified field augmentation pipeline from `augmentations.py`:
+    - `fill_mode='reflect'` (mirror padding) to eliminate edge-smearing artifacts
+    - Random Erasing / Cutout: p=0.5, 1 patch, small 2%-8% area scale, random noise fill
+    - Subtle photometric jitter: contrast ±15-20%, subtle saturation ±15%, hue shift clamped to [-0.03, +0.03]
+    - Subtle Gaussian blur: ~25% probability, sigma 0.3 to 1.0 (phone autofocus simulation)
+    - Geometric transforms: rotation ±40°, width/height shifts ±20%, zoom ±20%, horizontal flip
+    - Vertical flip disabled (preserves upward mushroom growth habit)
+    - Validation split (20%): clean rescale=1./255 only (zero augmentations)
+
 Usage (CLI):
     python retrain.py --manifest /tmp/retrain_manifest.json
 
@@ -27,8 +37,18 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Ensure algorithm directory is in sys.path
+BASE_DIR = Path(__file__).resolve().parent
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
 import numpy as np
 from PIL import ImageFile
+
+try:
+    from augmentations import field_photometry_and_occlusion
+except ImportError:
+    from .augmentations import field_photometry_and_occlusion
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -45,6 +65,7 @@ NOT_MUSHROOM_DIR = DATASET_DIR / "not_mushroom"
 IMAGE_SIZE = (224, 224)
 BATCH_SIZE = int(os.environ.get("RETRAIN_BATCH_SIZE", "8"))
 EPOCHS     = int(os.environ.get("RETRAIN_EPOCHS", "10"))
+VALIDATION_SPLIT = float(os.environ.get("RETRAIN_VALIDATION_SPLIT", "0.2"))
 
 VALID_LABELS = {"edible", "poisonous", "not_mushroom"}
 
@@ -134,10 +155,11 @@ def run_training() -> dict:
     import tensorflow as tf
     from tensorflow.keras import callbacks, layers, models
 
-    # Count images per class for the log (including any species subfolders)
-    edible_count       = sum(1 for f in EDIBLE_DIR.rglob("*") if f.is_file())
-    poisonous_count    = sum(1 for f in POISONOUS_DIR.rglob("*") if f.is_file())
-    not_mushroom_count = sum(1 for f in NOT_MUSHROOM_DIR.rglob("*") if f.is_file())
+    # Count images per class for the log (including any species subfolders, excluding non-image files)
+    image_exts = {".jpg", ".jpeg", ".png", ".webp"}
+    edible_count       = sum(1 for f in EDIBLE_DIR.rglob("*") if f.is_file() and f.suffix.lower() in image_exts)
+    poisonous_count    = sum(1 for f in POISONOUS_DIR.rglob("*") if f.is_file() and f.suffix.lower() in image_exts)
+    not_mushroom_count = sum(1 for f in NOT_MUSHROOM_DIR.rglob("*") if f.is_file() and f.suffix.lower() in image_exts)
     total_images       = edible_count + poisonous_count + not_mushroom_count
 
     print(
@@ -159,14 +181,17 @@ def run_training() -> dict:
         height_shift_range=0.2,
         shear_range=0.2,
         zoom_range=0.2,
+        brightness_range=[0.80, 1.25],
         horizontal_flip=True,
-        fill_mode="nearest",
-        validation_split=0.2,
+        vertical_flip=False,
+        fill_mode="reflect",
+        preprocessing_function=field_photometry_and_occlusion,
+        validation_split=VALIDATION_SPLIT,
     )
 
     val_datagen = tf.keras.preprocessing.image.ImageDataGenerator(
         rescale=1.0 / 255,
-        validation_split=0.2,
+        validation_split=VALIDATION_SPLIT,
     )
 
     model = None

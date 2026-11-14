@@ -26,7 +26,7 @@ SPECIES_CLASSES_PATH = BASE_DIR / "models" / "species_indices.npy"
 SPECIES_META_PATH = BASE_DIR / "models" / "species_metadata.json"
 
 IMAGE_SIZE = (224, 224)
-THRESHOLD = 0.5
+THRESHOLD = float(os.environ.get("MUSHROOM_CONFIDENCE_THRESHOLD", "0.75"))
 SPECIES_THRESHOLD = float(os.environ.get("SPECIES_CONFIDENCE_THRESHOLD", "0.65"))
 CALIBRATION_TEMP = float(os.environ.get("CALIBRATION_TEMPERATURE", "1.4"))
 CALIBRATION_EPS = float(os.environ.get("CALIBRATION_SMOOTHING", "0.015"))
@@ -211,7 +211,11 @@ def predict_species(image_batch, edibility_label: str | None = None) -> dict | N
         species_key = info["key"]
     else:
         cls_title = (edibility_label or "mushroom").capitalize()
-        display_name = f"Unknown {cls_title} Species"
+        display_name = (
+            f"Unknown / Uncatalogued {cls_title} Species"
+            if edibility_label in ("edible", "poisonous")
+            else "Unknown / Uncatalogued Species"
+        )
         scientific_name = None
         common_name = None
         species_key = "unknown_species"
@@ -235,19 +239,41 @@ def predict_mushroom(image_path, detect_only=False):
     model, labels_map = load_assets()
 
     raw_predictions = model.predict(image_batch, verbose=0)[0]  # shape (3,) — softmax probs
+    raw_max_prob = float(np.max(raw_predictions))
     predictions = calibrate_probabilities(raw_predictions)
     predicted_index = int(np.argmax(predictions))
     stage1_confidence = float(predictions[predicted_index])
-    label = labels_map.get(predicted_index, "unknown")
-    is_mushroom = label.lower() != "not_mushroom"
+    raw_label = labels_map.get(predicted_index, "unknown")
+
+    # --- OOD & Confidence Threshold Check ---
+    # Out-of-Distribution (OOD) objects (leaves, debris, household items)
+    # can trigger low or split logits. If the max softmax probability falls below
+    # THRESHOLD (0.75-0.80), reject as "Uncertain / Not a Mushroom".
+    is_uncertain = (raw_max_prob < THRESHOLD) or (stage1_confidence < (THRESHOLD - 0.05))
+
+    if is_uncertain and raw_label.lower() != "not_mushroom":
+        label = "not_mushroom"
+        is_mushroom = False
+        is_uncertain_ood = True
+    elif raw_label.lower() == "not_mushroom":
+        label = "not_mushroom"
+        is_mushroom = False
+        is_uncertain_ood = is_uncertain
+    else:
+        label = raw_label
+        is_mushroom = True
+        is_uncertain_ood = False
 
     if detect_only:
         return {
             "ok":           True,
             "image":        str(resolved_image_path),
             "is_mushroom":  is_mushroom,
-            "status_label": "subject is mushroom" if is_mushroom else "subject not mushroom",
+            "status_label": "subject is mushroom" if is_mushroom else ("subject uncertain / not mushroom" if is_uncertain_ood else "subject not mushroom"),
+            "is_uncertain": is_uncertain_ood,
             "threshold":    THRESHOLD,
+            "confidence":   round(stage1_confidence, 4),
+            "raw_max_prob": round(raw_max_prob, 4),
         }
 
     species_result = None
@@ -262,20 +288,32 @@ def predict_mushroom(image_path, detect_only=False):
         confidence = stage1_confidence
 
     if not is_mushroom:
-        result_name = "Not a mushroom"
+        result_name = "Uncertain / Not a Mushroom" if is_uncertain_ood else "Not a mushroom"
         species_name = "not_mushroom"
         scientific_name = None
         common_name = None
+        warning = (
+            "Low confidence: image may be out-of-distribution or not a mushroom. Please take a clearer photo."
+            if is_uncertain_ood
+            else "No mushroom detected in the image."
+        )
     elif species_result is not None:
         result_name = species_result["display_name"]
         species_name = species_result["scientific_name"] or result_name
         scientific_name = species_result["scientific_name"]
         common_name = species_result["common_name"]
+        warning = "Do not eat wild mushrooms based only on AI prediction."
     else:
-        result_name = f"Unknown {label.capitalize()} Species"
-        species_name = label
+        cls_title = (label or "mushroom").capitalize()
+        result_name = (
+            f"Unknown / Uncatalogued {cls_title} Species"
+            if label in ("edible", "poisonous")
+            else "Unknown / Uncatalogued Species"
+        )
+        species_name = result_name
         scientific_name = None
         common_name = None
+        warning = "Do not eat wild mushrooms based only on AI prediction."
 
     return {
         "ok":                         True,
@@ -287,14 +325,20 @@ def predict_mushroom(image_path, detect_only=False):
         "common_name":                common_name,
         "is_poisonous":               label.lower() == "poisonous",
         "is_mushroom":                is_mushroom,
+        "is_uncertain":               is_uncertain_ood,
+        "is_confident_species":       species_result["is_confident_species"] if species_result else False,
+        "is_uncatalogued":            (not species_result["is_confident_species"]) if species_result else True,
+        "closest_species":            species_result.get("closest_species") if species_result else None,
         "confidence":                 round(confidence, 4),
         "confidence_percent":         round(confidence * 100, 2),
+        "raw_max_prob":               round(raw_max_prob, 4),
         "species_confidence":         species_result["species_confidence"] if species_result else None,
         "species_confidence_percent": species_result["species_confidence_percent"] if species_result else None,
         "raw_score":                  [round(float(p), 6) for p in predictions],
         "species_raw_score":          species_result["species_raw_score"] if species_result else None,
         "threshold":                  THRESHOLD,
-        "warning":                    "Do not eat wild mushrooms based only on AI prediction.",
+        "species_threshold":          SPECIES_THRESHOLD,
+        "warning":                    warning,
     }
 
 

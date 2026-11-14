@@ -16,6 +16,13 @@ Pre-configured subfolders (created automatically if missing):
 Any additional subfolder added to `species_dataset/<Species_Name>/` with images
 will also be included automatically. Empty subfolders are skipped during training.
 
+Inference Safeguard:
+  Stage-2 species inference in `predict.py` calibrates softmax logits and enforces
+  a confidence threshold (`SPECIES_CONFIDENCE_THRESHOLD`, default: 0.65). If a genuine
+  mushroom passes Stage-1 edibility but does not match any catalogued species with >=65%
+  calibrated confidence, it cleanly falls back to "Unknown / Uncatalogued Species" rather
+  than force-matching the specimen to an arbitrary nearest neighbor.
+
 Usage:
     python train_species.py
     python train_species.py --epochs 20 --batch-size 32
@@ -24,14 +31,25 @@ Usage:
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+
+# Ensure algorithm directory is in sys.path
+BASE_DIR = Path(__file__).resolve().parent
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
 
 import numpy as np
 from PIL import ImageFile
 import tensorflow as tf
 from tensorflow.keras import callbacks, layers, models
+
+try:
+    from augmentations import field_photometry_and_occlusion
+except ImportError:
+    from .augmentations import field_photometry_and_occlusion
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -106,8 +124,11 @@ def train_species_model(
         height_shift_range=0.2,
         shear_range=0.2,
         zoom_range=0.2,
+        brightness_range=[0.80, 1.25],
         horizontal_flip=True,
-        fill_mode="nearest",
+        vertical_flip=False,
+        fill_mode="reflect",
+        preprocessing_function=field_photometry_and_occlusion,
         validation_split=VALIDATION_SPLIT,
     )
 

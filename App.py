@@ -99,6 +99,14 @@ def convert_to_webp(file) -> str:
     return tmp_path
 
 
+def _verify_retrain_key():
+    """Returns None if auth is OK, or a (response, status_code) tuple if not."""
+    key = request.headers.get("X-Retrain-Key") or request.args.get("key") or ""
+    if not hmac.compare_digest(key.encode(), RETRAIN_KEY.encode()):
+        return jsonify({"message": "Unauthorized."}), 401
+    return None
+
+
 # ── Health check ───────────────────────────────────────────────────────────────
 
 @app.route("/health", methods=["GET"])
@@ -192,11 +200,11 @@ def _run_image_inference(detect_only: bool = False):
     if not result["is_mushroom"]:
         return jsonify(
             {
-                "result_name":           "Not a mushroom",
+                "result_name":           result.get("result_name", "Not a mushroom"),
                 "result_classification": "not_mushroom",
                 "confidence":            result["confidence_percent"],
                 "confidence_level":      result["confidence_percent"],
-                "warning":               "No mushroom detected in the image.",
+                "warning":               result.get("warning", "No mushroom detected in the image."),
             }
         ), 200
 
@@ -210,6 +218,10 @@ def _run_image_inference(detect_only: bool = False):
             "confidence":            result["confidence_percent"],
             "confidence_level":      result["confidence_percent"],
             "species_confidence":    result["species_confidence_percent"],
+            "is_confident_species":  result.get("is_confident_species", False),
+            "is_uncatalogued":       result.get("is_uncatalogued", False),
+            "closest_species":       result.get("closest_species"),
+            "species_threshold":     result.get("species_threshold"),
             "is_poisonous":          result["is_poisonous"],
             "raw_score":             result["raw_score"],
             "species_raw_score":     result["species_raw_score"],
@@ -231,14 +243,6 @@ def classify():
 
 
 # ── Retrain endpoints ──────────────────────────────────────────────────────────
-
-def _verify_retrain_key():
-    """Returns None if auth is OK, or a (response, status_code) tuple if not."""
-    key = request.headers.get("X-Retrain-Key") or request.args.get("key") or ""
-    if not hmac.compare_digest(key.encode(), RETRAIN_KEY.encode()):
-        return jsonify({"message": "Unauthorized."}), 401
-    return None
-
 
 def _record_log_start(started_at: str, saved_counts: dict):
     """Prepend a 'running' entry to retrain_log.json as soon as a job is queued."""
@@ -363,8 +367,14 @@ def retrain():
             if not allowed_file(img_file.filename):
                 continue
 
-            # secure_filename blocks path traversal; the index prefix avoids name clashes
-            safe_name = f"{idx}_{secure_filename(img_file.filename)}"
+            # secure_filename blocks path traversal; preserve extension safely even for unicode/emojis
+            orig_name = img_file.filename or "upload.jpg"
+            stem, ext = os.path.splitext(orig_name)
+            ext = ext.lower()
+            if ext not in (".jpg", ".jpeg", ".png", ".webp"):
+                ext = ".jpg"
+            safe_stem = secure_filename(stem) or "img"
+            safe_name = f"{idx}_{safe_stem}{ext}"
             dest = os.path.join(tmp_dir, safe_name)
             img_file.save(dest)
             manifest.append({"path": dest, "label": label})
