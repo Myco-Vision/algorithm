@@ -36,16 +36,16 @@ image = (
         "gunicorn>=21.0.0",
     )
     # Copy application code into container /app
-    .add_local_file(BASE_DIR / "App.py", remote_path="/app/App.py")
-    .add_local_file(BASE_DIR / "predict.py", remote_path="/app/predict.py")
-    .add_local_file(BASE_DIR / "retrain.py", remote_path="/app/retrain.py")
-    .add_local_file(BASE_DIR / "train_species.py", remote_path="/app/train_species.py")
-    .add_local_file(BASE_DIR / "augmentations.py", remote_path="/app/augmentations.py")
-    .add_local_file(BASE_DIR / "species_catalog.py", remote_path="/app/species_catalog.py")
+    .add_local_file(BASE_DIR / "App.py", remote_path="/app/App.py", copy=True)
+    .add_local_file(BASE_DIR / "predict.py", remote_path="/app/predict.py", copy=True)
+    .add_local_file(BASE_DIR / "retrain.py", remote_path="/app/retrain.py", copy=True)
+    .add_local_file(BASE_DIR / "train_species.py", remote_path="/app/train_species.py", copy=True)
+    .add_local_file(BASE_DIR / "augmentations.py", remote_path="/app/augmentations.py", copy=True)
+    .add_local_file(BASE_DIR / "species_catalog.py", remote_path="/app/species_catalog.py", copy=True)
     # Bake the trained model weights (~21 MB) directly into /app/models
-    .add_local_dir(BASE_DIR / "models", remote_path="/app/models")
+    .add_local_dir(BASE_DIR / "models", remote_path="/app/models", copy=True)
     # Bake the base mushroom dataset (127 MB) so incremental retraining has full baseline data
-    .add_local_dir(BASE_DIR / "mushroom_dataset", remote_path="/app/mushroom_dataset")
+    .add_local_dir(BASE_DIR / "mushroom_dataset", remote_path="/app/mushroom_dataset", copy=True)
 )
 
 # ── 3. Persistent Volume (for Retrained Weights & User Datasets) ────────────────
@@ -57,9 +57,10 @@ models_volume = modal.Volume.from_name("mycovision-models-volume", create_if_mis
 # ── 4. Web Endpoint (Inference / Classification API) ───────────────────────────
 @app.function(
     image=image,
-    cpu=2,
-    memory=2048,           # 2 GB RAM (comfortably handles TensorFlow without OOM)
+    cpu=4,                  # 4 vCPUs for fast inference and fine-tuning
+    memory=4096,           # 4 GB RAM (comfortably handles TensorFlow without OOM)
     timeout=600,            # 10 minutes (ensures retraining jobs finish cleanly without timeout)
+    scaledown_window=300,   # Keep warm 5 minutes after last request
     volumes={"/app/models_persisted": models_volume},
     secrets=[
         modal.Secret.from_dict({
@@ -84,10 +85,17 @@ def flask_app():
     persisted_dir = Path("/app/models_persisted")
     target_dir = Path("/app/models")
     if persisted_dir.exists():
+        try:
+            models_volume.reload()
+        except Exception:
+            pass
         for f in persisted_dir.glob("*"):
             if f.is_file():
                 import shutil
-                shutil.copy2(f, target_dir / f.name)
+                if f.name == "retrain_log.json":
+                    shutil.copy2(f, Path("/app/retrain_log.json"))
+                else:
+                    shutil.copy2(f, target_dir / f.name)
 
     from App import app as myco_flask
     return myco_flask
@@ -132,6 +140,8 @@ def retrain_on_gpu(manifest: list):
     for model_file in Path("/app/models").glob("*"):
         if model_file.is_file():
             shutil.copy2(model_file, persisted_dir / model_file.name)
+    if Path("/app/retrain_log.json").exists():
+        shutil.copy2(Path("/app/retrain_log.json"), persisted_dir / "retrain_log.json")
 
     models_volume.commit()
     return result

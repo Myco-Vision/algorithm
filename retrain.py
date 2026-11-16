@@ -171,7 +171,10 @@ def run_training() -> dict:
     if total_images == 0:
         raise ValueError("No images found in mushroom_dataset/. Aborting.")
     if edible_count == 0 or poisonous_count == 0 or not_mushroom_count == 0:
-        raise ValueError("All 3 classes ('edible', 'poisonous', 'not_mushroom') must have at least one image.")
+        raise ValueError(
+            f"All 3 classes ('edible', 'poisonous', 'not_mushroom') must have at least one image. "
+            f"Found: edible={edible_count}, poisonous={poisonous_count}, not_mushroom={not_mushroom_count}."
+        )
 
     # ── Data generators (80% augmented training / 20% clean validation) ──────
     augment = tf.keras.preprocessing.image.ImageDataGenerator(
@@ -287,6 +290,13 @@ def run_training() -> dict:
                 if LOG_PATH.exists():
                     shutil.copy2(LOG_PATH, persisted_dir / LOG_PATH.name)
                 print("[DONE] Model weights and logs persisted to /app/models_persisted.", flush=True)
+                try:
+                    import modal
+                    vol = modal.Volume.from_name("mycovision-models-volume")
+                    vol.commit()
+                    print("[DONE] Modal volume committed successfully.", flush=True)
+                except Exception as vol_err:
+                    print(f"[INFO] Volume commit note: {vol_err}", flush=True)
             except Exception as e:
                 print(f"[WARN] Persistent storage sync note: {e}", flush=True)
 
