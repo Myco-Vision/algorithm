@@ -261,12 +261,24 @@ def run_training() -> dict:
             verbose=1,
         )
 
+        # ── Balanced Class Weights ───────────────────────────────────────────────
+        # When dataset has unequal counts (e.g. 400 not_mushroom vs 30 poisonous),
+        # compute inverse frequency weights so the model does not collapse toward not_mushroom.
+        unique_classes = np.unique(train_gen.classes)
+        total_samples = len(train_gen.classes)
+        class_weight = {}
+        for c in unique_classes:
+            count = int(np.sum(train_gen.classes == c))
+            class_weight[int(c)] = float(total_samples / (len(unique_classes) * max(count, 1)))
+        print(f"[INFO] Applied balanced class weights: {class_weight}", flush=True)
+
         print("[INFO] Starting training loop…", flush=True)
         history = model.fit(
             train_gen,
             epochs=EPOCHS,
             validation_data=val_gen if has_val else None,
             callbacks=[early_stop],
+            class_weight=class_weight,
             verbose=1,
         )
 

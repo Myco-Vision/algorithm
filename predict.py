@@ -26,7 +26,8 @@ SPECIES_CLASSES_PATH = BASE_DIR / "models" / "species_indices.npy"
 SPECIES_META_PATH = BASE_DIR / "models" / "species_metadata.json"
 
 IMAGE_SIZE = (224, 224)
-THRESHOLD = float(os.environ.get("MUSHROOM_CONFIDENCE_THRESHOLD", "0.75"))
+THRESHOLD = float(os.environ.get("MUSHROOM_CONFIDENCE_THRESHOLD", "0.70"))
+OOD_MIN_MAX_THRESHOLD = float(os.environ.get("OOD_MIN_CONFIDENCE_THRESHOLD", "0.60"))
 SPECIES_THRESHOLD = float(os.environ.get("SPECIES_CONFIDENCE_THRESHOLD", "0.65"))
 CALIBRATION_TEMP = float(os.environ.get("CALIBRATION_TEMPERATURE", "1.4"))
 CALIBRATION_EPS = float(os.environ.get("CALIBRATION_SMOOTHING", "0.015"))
@@ -245,24 +246,52 @@ def predict_mushroom(image_path, detect_only=False):
     stage1_confidence = float(predictions[predicted_index])
     raw_label = labels_map.get(predicted_index, "unknown")
 
+    # Resolve class indices for mushroom vs non-mushroom evaluation
+    not_mush_idx = None
+    edible_idx = None
+    poison_idx = None
+    for idx, name in labels_map.items():
+        n = str(name).lower()
+        if n == "not_mushroom":
+            not_mush_idx = idx
+        elif n == "edible":
+            edible_idx = idx
+        elif n == "poisonous":
+            poison_idx = idx
+
+    prob_not_mushroom = float(raw_predictions[not_mush_idx]) if not_mush_idx is not None else 0.0
+    prob_mushroom = (
+        float(raw_predictions[edible_idx] + raw_predictions[poison_idx])
+        if edible_idx is not None and poison_idx is not None
+        else (1.0 - prob_not_mushroom)
+    )
+
     # --- OOD & Confidence Threshold Check ---
     # Out-of-Distribution (OOD) objects (leaves, debris, household items)
-    # can trigger low or split logits. If the max softmax probability falls below
-    # THRESHOLD (0.75-0.80), reject as "Uncertain / Not a Mushroom".
-    is_uncertain = (raw_max_prob < THRESHOLD) or (stage1_confidence < (THRESHOLD - 0.05))
-
-    if is_uncertain and raw_label.lower() != "not_mushroom":
+    # produce flat, weak, or split logits where mushroom presence is low.
+    # A genuine mushroom may have split confidence between edible and poisonous,
+    # but aggregate mushroom presence (P(edible) + P(poisonous)) remains high (>0.85).
+    # We reject as "Uncertain / Not a Mushroom" if:
+    # 1. The explicit winner is 'not_mushroom'
+    # 2. Total mushroom presence probability falls below THRESHOLD (0.70)
+    # 3. The raw max softmax across all classes falls below OOD_MIN_MAX_THRESHOLD (0.60)
+    if raw_label.lower() == "not_mushroom":
+        label = "not_mushroom"
+        is_mushroom = False
+        is_uncertain_ood = (raw_max_prob < THRESHOLD)
+    elif (prob_mushroom < THRESHOLD) or (raw_max_prob < OOD_MIN_MAX_THRESHOLD):
         label = "not_mushroom"
         is_mushroom = False
         is_uncertain_ood = True
-    elif raw_label.lower() == "not_mushroom":
-        label = "not_mushroom"
-        is_mushroom = False
-        is_uncertain_ood = is_uncertain
     else:
         label = raw_label
         is_mushroom = True
         is_uncertain_ood = False
+
+        # Foraging safety rule: if classified as edible but poisonous probability is suspiciously high (>0.25),
+        # default to poisonous for user protection.
+        if label.lower() == "edible" and poison_idx is not None and float(raw_predictions[poison_idx]) > 0.25:
+            label = "poisonous"
 
     if detect_only:
         return {

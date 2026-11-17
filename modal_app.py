@@ -85,7 +85,8 @@ gpu_image = (
     secrets=[
         modal.Secret.from_dict({
             "RETRAIN_API_KEY": os.environ.get("RETRAIN_API_KEY", "myco-retrain-secret"),
-            "MUSHROOM_CONFIDENCE_THRESHOLD": "0.75",
+            "MUSHROOM_CONFIDENCE_THRESHOLD": "0.70",
+            "OOD_MIN_CONFIDENCE_THRESHOLD": "0.60",
             "SPECIES_CONFIDENCE_THRESHOLD": "0.65",
             "CALIBRATION_TEMPERATURE": "1.4",
             "TF_CPP_MIN_LOG_LEVEL": "2",
@@ -190,7 +191,8 @@ def retrain_on_gpu(manifest_items: list, started_at: str | None = None):
     secrets=[
         modal.Secret.from_dict({
             "RETRAIN_API_KEY": os.environ.get("RETRAIN_API_KEY", "myco-retrain-secret"),
-            "MUSHROOM_CONFIDENCE_THRESHOLD": os.environ.get("MUSHROOM_CONFIDENCE_THRESHOLD", "0.75"),
+            "MUSHROOM_CONFIDENCE_THRESHOLD": os.environ.get("MUSHROOM_CONFIDENCE_THRESHOLD", "0.70"),
+            "OOD_MIN_CONFIDENCE_THRESHOLD": os.environ.get("OOD_MIN_CONFIDENCE_THRESHOLD", "0.60"),
             "SPECIES_CONFIDENCE_THRESHOLD": os.environ.get("SPECIES_CONFIDENCE_THRESHOLD", "0.65"),
             "CALIBRATION_TEMPERATURE": os.environ.get("CALIBRATION_TEMPERATURE", "1.4"),
             "TF_CPP_MIN_LOG_LEVEL": "3",
