@@ -313,6 +313,15 @@ def _run_retrain_in_background(tmp_dir: str, manifest: list, started_at: str):
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+def _get_modal_module():
+    """Retrieve modal_app module if running inside Modal deployment."""
+    try:
+        import modal_app
+        return modal_app
+    except Exception:
+        return sys.modules.get("modal_app")
+
+
 @app.route("/retrain", methods=["POST"])
 def retrain():
     """
@@ -338,6 +347,72 @@ def retrain():
     if len(images) != len(labels):
         return jsonify({"message": "images[] and labels[] counts must match."}), 400
 
+    modal_mod = _get_modal_module()
+    is_modal = modal_mod is not None and hasattr(modal_mod, "retrain_on_gpu") and hasattr(modal_mod, "retrain_state")
+
+    if is_modal:
+        # Atomic lock check via Modal shared Dict
+        current = modal_mod.retrain_state.get("current") or {}
+        if current.get("state") == "running":
+            return jsonify({
+                "message": "A retrain job is already in progress on GPU.",
+                "state":   "running",
+            }), 409
+
+        manifest_items = []
+        saved_counts = {"edible": 0, "poisonous": 0, "not_mushroom": 0}
+
+        for idx, (img_file, label) in enumerate(zip(images, labels)):
+            label = label.lower().strip()
+            if label not in ("edible", "poisonous", "not_mushroom"):
+                continue
+            if not allowed_file(img_file.filename):
+                continue
+
+            orig_name = img_file.filename or "upload.jpg"
+            stem, ext = os.path.splitext(orig_name)
+            ext = ext.lower()
+            if ext not in (".jpg", ".jpeg", ".png", ".webp"):
+                ext = ".jpg"
+            safe_stem = secure_filename(stem) or "img"
+            safe_name = f"{idx}_{safe_stem}{ext}"
+
+            img_bytes = img_file.read()
+            manifest_items.append({
+                "filename": safe_name,
+                "bytes":    img_bytes,
+                "label":    label,
+            })
+            saved_counts[label] += 1
+
+        if not manifest_items:
+            return jsonify({"message": "No valid images after filtering."}), 400
+
+        started_at = now_iso()
+        modal_mod.retrain_state["current"] = {
+            "state":               "running",
+            "started_at":          started_at,
+            "finished_at":         None,
+            "error":               None,
+            "last_result":         None,
+            "new_edible":          saved_counts["edible"],
+            "new_poisonous":       saved_counts["poisonous"],
+            "new_not_mushroom":    saved_counts["not_mushroom"],
+        }
+
+        # Dispatch asynchronous GPU training task on Modal
+        modal_mod.retrain_on_gpu.spawn(manifest_items, started_at)
+
+        return jsonify({
+            "message":          "Retraining dispatched to Modal GPU worker.",
+            "state":            "running",
+            "edible_queued":    saved_counts["edible"],
+            "poisonous_queued": saved_counts["poisonous"],
+            "not_mushroom_queued": saved_counts["not_mushroom"],
+            "total_queued":     len(manifest_items),
+        }), 202
+
+    # ── Fallback for local development / non-Modal environments ────────────
     # Reserve the "running" slot atomically so two requests can't both start a job
     with _retrain_lock:
         if _retrain_status["state"] == "running":
@@ -354,7 +429,7 @@ def retrain():
             "last_result": None,
         })
 
-    # ── Save uploaded images and build the manifest ────────────────────────
+    # Save uploaded images and build the manifest
     tmp_dir      = tempfile.mkdtemp(prefix="myco_retrain_")
     manifest     = []
     saved_counts = {"edible": 0, "poisonous": 0, "not_mushroom": 0}
@@ -367,7 +442,6 @@ def retrain():
             if not allowed_file(img_file.filename):
                 continue
 
-            # secure_filename blocks path traversal; preserve extension safely even for unicode/emojis
             orig_name = img_file.filename or "upload.jpg"
             stem, ext = os.path.splitext(orig_name)
             ext = ext.lower()
@@ -393,7 +467,6 @@ def retrain():
         thread.start()
 
     except Exception as exc:
-        # Nothing was started: clean up and restore the previous status
         shutil.rmtree(tmp_dir, ignore_errors=True)
         with _retrain_lock:
             _retrain_status.update(previous_status)
@@ -419,10 +492,49 @@ def retrain_status():
     if auth_error:
         return auth_error
 
+    modal_mod = _get_modal_module()
+    if modal_mod and hasattr(modal_mod, "retrain_state"):
+        current = modal_mod.retrain_state.get("current") or {"state": "idle"}
+        history = modal_mod.retrain_state.get("history")
+
+        # When a training run completes, sync newly trained weights from persistent volume
+        if current.get("state") == "done":
+            try:
+                modal_mod.models_volume.reload()
+                persisted_dir = Path("/app/models_persisted")
+                target_dir = BASE_DIR / "models"
+                if persisted_dir.exists():
+                    for f in persisted_dir.glob("*"):
+                        if f.is_file() and f.name != "retrain_log.json":
+                            shutil.copy2(f, target_dir / f.name)
+                unload_assets()
+            except Exception:
+                pass
+
+        if not history:
+            log_candidates = [
+                Path("/app/models_persisted/retrain_log.json"),
+                LOG_PATH,
+            ]
+            for lp in log_candidates:
+                if lp.exists():
+                    try:
+                        history = json.loads(lp.read_text())
+                        if isinstance(history, list):
+                            break
+                    except Exception:
+                        pass
+            history = history if isinstance(history, list) else []
+
+        return jsonify({
+            "current": current,
+            "history": history[:20],
+            "last_result": current.get("last_result"),
+        }), 200
+
     with _retrain_lock:
         status = dict(_retrain_status)
 
-    # Also pull full log history
     history = []
     if LOG_PATH.exists():
         try:
