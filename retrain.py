@@ -101,6 +101,9 @@ def append_log(entry: dict):
 def ingest_images(manifest: list) -> dict[str, int]:
     """
     Copy new images from the manifest into mushroom_dataset/.
+    Only ingests crowd-collected images where annotation_status == 'approved',
+    reading from verified_species (instead of unverified predicted_species)
+    to prevent label noise from degrading model accuracy.
     Returns counts: {"edible": N, "poisonous": M, "not_mushroom": K}
     """
     EDIBLE_DIR.mkdir(parents=True, exist_ok=True)
@@ -110,11 +113,31 @@ def ingest_images(manifest: list) -> dict[str, int]:
     counts = {"edible": 0, "poisonous": 0, "not_mushroom": 0}
 
     for item in manifest:
-        src   = Path(item["path"])
-        label = item["label"].lower().strip()
+        src = Path(item["path"])
+
+        # Enforce HITL policy: if annotation_status is specified, only ingest 'approved' crowd scans
+        status = str(item.get("annotation_status", "")).lower().strip()
+        if status and status != "approved":
+            print(f"[SKIP] Scan not approved for retraining (status: '{status}') for {src.name}", flush=True)
+            continue
+
+        # Prevent label noise: resolve classification from verified_species if available
+        label = ""
+        verified_species = item.get("verified_species")
+        if verified_species:
+            try:
+                from species_catalog import get_species_info
+                info = get_species_info(str(verified_species))
+                if info and info.get("classification") in VALID_LABELS:
+                    label = info["classification"]
+            except Exception:
+                pass
+
+        if not label:
+            label = str(item.get("label", "")).lower().strip()
 
         if label not in VALID_LABELS:
-            print(f"[SKIP] Unknown label '{label}' for {src.name}", flush=True)
+            print(f"[SKIP] Unknown or invalid label '{label}' for {src.name}", flush=True)
             continue
 
         if not src.exists():
@@ -138,7 +161,7 @@ def ingest_images(manifest: list) -> dict[str, int]:
 
         shutil.copy2(src, dest_path)
         counts[label] += 1
-        print(f"[COPY] {label}: {src.name} → {dest_path.name}", flush=True)
+        print(f"[COPY] {label} (verified): {src.name} → {dest_path.name}", flush=True)
 
     return counts
 

@@ -341,6 +341,8 @@ def retrain():
 
     images = request.files.getlist("images[]")
     labels = request.form.getlist("labels[]")
+    annotation_statuses = request.form.getlist("annotation_statuses[]")
+    verified_species_list = request.form.getlist("verified_species[]")
 
     if not images:
         return jsonify({"message": "No images provided."}), 400
@@ -363,6 +365,22 @@ def retrain():
         saved_counts = {"edible": 0, "poisonous": 0, "not_mushroom": 0}
 
         for idx, (img_file, label) in enumerate(zip(images, labels)):
+            # Enforce human-in-the-loop approved status for crowd contributions
+            status = (annotation_statuses[idx] if idx < len(annotation_statuses) else "").lower().strip()
+            if status and status != "approved":
+                continue
+
+            # Prioritize verified species classification to eliminate label noise
+            verified_sp = verified_species_list[idx] if idx < len(verified_species_list) else ""
+            if verified_sp:
+                try:
+                    from species_catalog import get_species_info
+                    info = get_species_info(str(verified_sp))
+                    if info and info.get("classification") in ("edible", "poisonous", "not_mushroom"):
+                        label = info["classification"]
+                except Exception:
+                    pass
+
             label = label.lower().strip()
             if label not in ("edible", "poisonous", "not_mushroom"):
                 continue
@@ -397,7 +415,7 @@ def retrain():
             "last_result":         None,
             "new_edible":          saved_counts["edible"],
             "new_poisonous":       saved_counts["poisonous"],
-            "new_not_mushroom":    saved_counts["not_mushroom"],
+            "new_not_mushroom":    saved_counts["new_not_mushroom"] if "new_not_mushroom" in saved_counts else saved_counts["not_mushroom"],
         }
 
         # Dispatch asynchronous GPU training task on Modal
@@ -436,6 +454,22 @@ def retrain():
 
     try:
         for idx, (img_file, label) in enumerate(zip(images, labels)):
+            # Enforce human-in-the-loop approved status for crowd contributions
+            status = (annotation_statuses[idx] if idx < len(annotation_statuses) else "").lower().strip()
+            if status and status != "approved":
+                continue
+
+            # Prioritize verified species classification to eliminate label noise
+            verified_sp = verified_species_list[idx] if idx < len(verified_species_list) else ""
+            if verified_sp:
+                try:
+                    from species_catalog import get_species_info
+                    info = get_species_info(str(verified_sp))
+                    if info and info.get("classification") in ("edible", "poisonous", "not_mushroom"):
+                        label = info["classification"]
+                except Exception:
+                    pass
+
             label = label.lower().strip()
             if label not in ("edible", "poisonous", "not_mushroom"):
                 continue
@@ -451,7 +485,7 @@ def retrain():
             safe_name = f"{idx}_{safe_stem}{ext}"
             dest = os.path.join(tmp_dir, safe_name)
             img_file.save(dest)
-            manifest.append({"path": dest, "label": label})
+            manifest.append({"path": dest, "label": label, "annotation_status": status, "verified_species": verified_sp})
             saved_counts[label] += 1
 
         if not manifest:
