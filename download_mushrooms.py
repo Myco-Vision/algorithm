@@ -77,6 +77,13 @@ TARGETS = {
         "classification": "edible",
         "places":         PLACES,
     },
+    "buna_shimeji": {
+        "folder":         "Hypsizygus_tessellatus",
+        "taxa":           SPECIES_CATALOG["Hypsizygus_tessellatus"]["taxa"],
+        "rank":           SPECIES_CATALOG["Hypsizygus_tessellatus"]["rank"],
+        "classification": "edible",
+        "places":         PLACES,
+    },
     "amanita_virosa": {
         "folder":         "Amanita_virosa",
         "taxa":           SPECIES_CATALOG["Amanita_virosa"]["taxa"],

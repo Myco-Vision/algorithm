@@ -38,6 +38,13 @@ SPECIES_CATALOG: dict[str, dict] = {
         "taxa":            ["Pleurotus pulmonarius"],
         "rank":            "species",
     },
+    "Hypsizygus_tessellatus": {
+        "scientific_name": "Hypsizygus tessellatus",
+        "common_name":     "Buna Shimeji",
+        "classification":  "edible",
+        "taxa":            ["Hypsizygus tessulatus", "Hypsizygus marmoreus"],
+        "rank":            "species",
+    },
     "Amanita_virosa": {
         "scientific_name": "Amanita virosa",
         "common_name":     "Destroying Angel",
