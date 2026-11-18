@@ -183,10 +183,10 @@ def retrain_on_gpu(manifest_items: list, started_at: str | None = None):
 # ── 5. Web Endpoint (Inference / Classification API) ───────────────────────────
 @app.function(
     image=web_image,
-    cpu=4,                  # 4 vCPUs for fast inference
-    memory=4096,           # 4 GB RAM
+    cpu=2,                  # 2 vCPUs for fast inference
+    memory=2048,           # 2 GB RAM
     timeout=600,            # 10 minutes
-    scaledown_window=300,   # Keep warm 5 minutes after last request
+    scaledown_window=15,    # Scale to zero after 15s of inactivity (saves Modal credits)
     volumes={"/app/models_persisted": models_volume},
     secrets=[
         modal.Secret.from_dict({
