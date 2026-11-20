@@ -66,6 +66,20 @@ SPECIES_CATALOG: dict[str, dict] = {
         "taxa":            ["Gymnopilus"],
         "rank":            "genus",
     },
+    "Ganoderma": {
+        "scientific_name": "Ganoderma",
+        "common_name":     "Reishi / Artist's Conk",
+        "classification":  "poisonous",
+        "taxa":            ["Ganoderma"],
+        "rank":            "genus",
+    },
+    "Trametes": {
+        "scientific_name": "Trametes",
+        "common_name":     "Turkey Tail Bracket",
+        "classification":  "poisonous",
+        "taxa":            ["Trametes"],
+        "rank":            "genus",
+    },
 }
 
 # Case-insensitive lookup map
