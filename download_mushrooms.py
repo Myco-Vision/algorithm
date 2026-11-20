@@ -24,6 +24,7 @@ Usage:
     python download_mushrooms.py oyster --cap 200          # cap worldwide pass to 200 obs
 """
 
+import argparse
 import csv
 import shutil
 import sys
@@ -102,6 +103,20 @@ TARGETS = {
         "folder":         "Gymnopilus",
         "taxa":           SPECIES_CATALOG["Gymnopilus"]["taxa"],
         "rank":           SPECIES_CATALOG["Gymnopilus"]["rank"],
+        "classification": "poisonous",
+        "places":         PLACES,
+    },
+    "ganoderma": {
+        "folder":         "Ganoderma",
+        "taxa":           SPECIES_CATALOG["Ganoderma"]["taxa"],
+        "rank":           SPECIES_CATALOG["Ganoderma"]["rank"],
+        "classification": "poisonous",
+        "places":         PLACES,
+    },
+    "trametes": {
+        "folder":         "Trametes",
+        "taxa":           SPECIES_CATALOG["Trametes"]["taxa"],
+        "rank":           SPECIES_CATALOG["Trametes"]["rank"],
         "classification": "poisonous",
         "places":         PLACES,
     },
@@ -223,10 +238,11 @@ def count_images(folder: Path) -> int:
 
 # -- PER-TARGET RUN -----------------------------------------------------------
 
-def run_target(key: str, cfg: dict):
+def run_target(key: str, cfg: dict, max_images: int | None = None):
     edibility_dir = EDIBLE_DIR if cfg["classification"] == "edible" else POISONOUS_DIR
     species_dir = edibility_dir / cfg["folder"]
     species_dir.mkdir(parents=True, exist_ok=True)
+    current_images = count_images(species_dir)
 
     log.info("")
     log.info("=" * 60)
@@ -260,7 +276,12 @@ def run_target(key: str, cfg: dict):
     total_downloaded = total_skipped = total_failed = 0
 
     for label, place_id, cap in targets:
+        if max_images and current_images >= max_images:
+            log.info(f"  Reached --max-images limit ({max_images}) for {key}")
+            break
         for quality in QUALITIES:
+            if max_images and current_images >= max_images:
+                break
             log.info("")
             log.info(f"--- [{key}] {label} | quality={quality} | place_id={place_id} ---")
 
@@ -332,12 +353,22 @@ def run_target(key: str, cfg: dict):
                         if result == "downloaded":
                             species_stats[species_name]["img_count"] += 1
                             total_downloaded += 1
+                            current_images += 1
                             log.info(f"  Downloaded: {species_name} | obs {obs_id} img {i}")
+                            if max_images and current_images >= max_images:
+                                break
                         elif result == "skipped":
                             species_stats[species_name]["img_count"] += 1
                             total_skipped += 1
                         else:
                             total_failed += 1
+
+                    if max_images and current_images >= max_images:
+                        break
+
+                if max_images and current_images >= max_images:
+                    log.info(f"  Reached --max-images limit ({max_images})")
+                    break
 
                 if cap and pass_new >= cap:
                     log.info(f"  Reached cap of {cap} new observations for this pass")
@@ -381,16 +412,19 @@ def run_target(key: str, cfg: dict):
 # -- MAIN ---------------------------------------------------------------------
 
 def main():
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    parser = argparse.ArgumentParser(description="Download mushroom images from iNaturalist.")
+    parser.add_argument("targets", nargs="*", help=f"Target keys from: {list(TARGETS)}")
+    parser.add_argument("--max-images", type=int, default=None, help="Stop once folder reaches this many images")
+    parsed = parser.parse_args()
 
-    requested = [a.lower() for a in args] or list(TARGETS)
+    requested = [a.lower() for a in parsed.targets] or list(TARGETS)
     unknown = [r for r in requested if r not in TARGETS]
     if unknown:
         log.error(f"Unknown target(s): {unknown}. Choose from: {list(TARGETS)}")
         return
 
     for key in requested:
-        run_target(key, TARGETS[key])
+        run_target(key, TARGETS[key], max_images=parsed.max_images)
 
     log.info("")
     log.info("NEXT STEPS:")
