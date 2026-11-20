@@ -291,16 +291,18 @@ def predict_mushroom(image_path, detect_only=False):
     # Out-of-Distribution (OOD) objects (leaves, debris, household items)
     # produce flat, weak, or split logits where mushroom presence is low.
     # A genuine mushroom may have split confidence between edible and poisonous,
-    # but aggregate mushroom presence (P(edible) + P(poisonous)) remains high (>0.85).
+    # but aggregate mushroom presence (P(edible) + P(poisonous)) remains high (>0.70).
     # We reject as "Uncertain / Not a Mushroom" if:
     # 1. The explicit winner is 'not_mushroom'
     # 2. Total mushroom presence probability falls below THRESHOLD (0.70)
-    # 3. The raw max softmax across all classes falls below OOD_MIN_MAX_THRESHOLD (0.60)
+    # 3. Logits are flat/OOD (raw_max_prob < 0.60) AND not_mushroom presence is significant (>= 0.20)
+    not_mush_prob = float(raw_predictions[not_mush_idx]) if not_mush_idx is not None else (1.0 - prob_mushroom)
+
     if raw_label.lower() == "not_mushroom":
         label = "not_mushroom"
         is_mushroom = False
         is_uncertain_ood = (raw_max_prob < THRESHOLD)
-    elif (prob_mushroom < THRESHOLD) or (raw_max_prob < OOD_MIN_MAX_THRESHOLD):
+    elif (prob_mushroom < THRESHOLD) or (raw_max_prob < OOD_MIN_MAX_THRESHOLD and not_mush_prob >= 0.20):
         label = "not_mushroom"
         is_mushroom = False
         is_uncertain_ood = True
