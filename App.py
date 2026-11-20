@@ -9,7 +9,7 @@ from pathlib import Path
 from threading import Lock, Thread
 
 from flask import Flask, request, jsonify
-from PIL import Image
+from PIL import Image, ImageOps
 from werkzeug.utils import secure_filename
 
 # Ensure the algorithm directory is in sys.path so imports work regardless of CWD
@@ -90,11 +90,12 @@ def allowed_file(filename):
 
 
 def convert_to_webp(file) -> str:
-    """Save uploaded file as a temp .webp and return the path."""
+    """Save uploaded file as a temp .webp and return the path, transposing EXIF orientation if present."""
     with tempfile.NamedTemporaryFile(delete=False, suffix=".webp") as tmp:
         tmp_path = tmp.name
 
-    image = Image.open(file).convert("RGB")
+    image = Image.open(file)
+    image = ImageOps.exif_transpose(image).convert("RGB")
     image.save(tmp_path, "WEBP", quality=85)
     return tmp_path
 

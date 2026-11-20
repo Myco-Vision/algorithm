@@ -10,7 +10,7 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "matplotlib"))
 
 import numpy as np
-from PIL import ImageFile
+from PIL import Image, ImageFile, ImageOps
 
 from species_catalog import get_species_info
 
@@ -160,18 +160,15 @@ def preprocess_image(image_path):
         raise PredictionError(f"Image path is not a file: {image_path}")
 
     try:
-        tf = get_tensorflow()
-        image = tf.keras.utils.load_img(
-            image_path,
-            target_size=IMAGE_SIZE,
-            color_mode="rgb",
-        )
+        with Image.open(image_path) as pil_img:
+            pil_img = ImageOps.exif_transpose(pil_img).convert("RGB")
+            pil_img = pil_img.resize(IMAGE_SIZE, Image.Resampling.BILINEAR)
+            image_array = np.array(pil_img, dtype=np.float32)
     except Exception as exc:
         raise PredictionError(
             "The uploaded file is not a readable image. Use JPG, PNG, or JPEG."
         ) from exc
 
-    image_array = tf.keras.utils.img_to_array(image)
     image_array = image_array / 255.0
     return np.expand_dims(image_array, axis=0), image_path
 
