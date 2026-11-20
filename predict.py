@@ -316,6 +316,29 @@ def predict_mushroom(image_path, detect_only=False):
         if label.lower() == "edible" and poison_idx is not None and float(raw_predictions[poison_idx]) > 0.25:
             label = "poisonous"
 
+    species_result = None
+    # Cross-validate ambiguous or borderline Stage-1 results against Stage-2 species model
+    if not is_mushroom and (not_mush_prob < 0.85 or prob_mushroom >= 0.25):
+        try:
+            species_candidate = predict_species(image_batch)
+            if species_candidate and species_candidate.get("is_confident_species"):
+                species_result = species_candidate
+                is_mushroom = True
+                is_uncertain_ood = False
+                resolved_info = get_species_info(
+                    species_candidate.get("species_key") or species_candidate.get("closest_species", "")
+                )
+                candidate_cls = resolved_info.get("classification")
+                if candidate_cls in ("edible", "poisonous"):
+                    label = candidate_cls
+                elif poison_idx is not None and float(raw_predictions[poison_idx]) >= float(raw_predictions[edible_idx] if edible_idx is not None else 0):
+                    label = "poisonous"
+                else:
+                    label = "edible"
+                stage1_confidence = max(prob_mushroom, float(species_candidate["species_confidence"]))
+        except Exception:
+            pass
+
     if detect_only:
         return {
             "ok":           True,
@@ -328,8 +351,7 @@ def predict_mushroom(image_path, detect_only=False):
             "raw_max_prob": round(raw_max_prob, 4),
         }
 
-    species_result = None
-    if is_mushroom:
+    if is_mushroom and species_result is None:
         species_result = predict_species(image_batch, edibility_label=label.lower())
 
     # Combine Stage-1 (edibility) and Stage-2 (species) confidence when species model is active
