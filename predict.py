@@ -151,7 +151,7 @@ def unload_assets():
     gc.collect()
 
 
-def preprocess_image(image_path):
+def preprocess_image(image_path, method="fit"):
     image_path = Path(image_path).expanduser().resolve()
 
     if not image_path.exists():
@@ -162,7 +162,12 @@ def preprocess_image(image_path):
     try:
         with Image.open(image_path) as pil_img:
             pil_img = ImageOps.exif_transpose(pil_img).convert("RGB")
-            pil_img = pil_img.resize(IMAGE_SIZE, Image.Resampling.BILINEAR)
+            if method == "fit":
+                # Preserves true natural morphology (caps/stems) via smart center fit
+                pil_img = ImageOps.fit(pil_img, IMAGE_SIZE, method=Image.Resampling.BILINEAR, centering=(0.5, 0.5))
+            else:
+                # Full frame uncropped view
+                pil_img = pil_img.resize(IMAGE_SIZE, Image.Resampling.BILINEAR)
             image_array = np.array(pil_img, dtype=np.float32)
     except Exception as exc:
         raise PredictionError(
@@ -233,15 +238,13 @@ def predict_species(image_batch, edibility_label: str | None = None) -> dict | N
 
 
 def predict_mushroom(image_path, detect_only=False):
-    image_batch, resolved_image_path = preprocess_image(image_path)
+    # Multi-crop evaluation: evaluate both aspect-ratio preserved fit and full frame
+    batch_fit, resolved_image_path = preprocess_image(image_path, method="fit")
+    batch_full, _ = preprocess_image(image_path, method="squish")
     model, labels_map = load_assets()
 
-    raw_predictions = model.predict(image_batch, verbose=0)[0]  # shape (3,) — softmax probs
-    raw_max_prob = float(np.max(raw_predictions))
-    predictions = calibrate_probabilities(raw_predictions)
-    predicted_index = int(np.argmax(predictions))
-    stage1_confidence = float(predictions[predicted_index])
-    raw_label = labels_map.get(predicted_index, "unknown")
+    raw_fit = model.predict(batch_fit, verbose=0)[0]
+    raw_full = model.predict(batch_full, verbose=0)[0]
 
     # Resolve class indices for mushroom vs non-mushroom evaluation
     not_mush_idx = None
@@ -256,12 +259,33 @@ def predict_mushroom(image_path, detect_only=False):
         elif n == "poisonous":
             poison_idx = idx
 
-    prob_not_mushroom = float(raw_predictions[not_mush_idx]) if not_mush_idx is not None else 0.0
-    prob_mushroom = (
-        float(raw_predictions[edible_idx] + raw_predictions[poison_idx])
+    # Calculate mushroom presence probability (P(edible) + P(poisonous)) for both views
+    mush_signal_fit = (
+        float(raw_fit[edible_idx] + raw_fit[poison_idx])
         if edible_idx is not None and poison_idx is not None
-        else (1.0 - prob_not_mushroom)
+        else (1.0 - float(raw_fit[not_mush_idx]))
     )
+    mush_signal_full = (
+        float(raw_full[edible_idx] + raw_full[poison_idx])
+        if edible_idx is not None and poison_idx is not None
+        else (1.0 - float(raw_full[not_mush_idx]))
+    )
+
+    # Select the view with the strongest genuine mushroom signal to avoid squishing artifacts
+    if mush_signal_fit >= mush_signal_full:
+        raw_predictions = raw_fit
+        image_batch = batch_fit
+        prob_mushroom = mush_signal_fit
+    else:
+        raw_predictions = raw_full
+        image_batch = batch_full
+        prob_mushroom = mush_signal_full
+
+    raw_max_prob = float(np.max(raw_predictions))
+    predictions = calibrate_probabilities(raw_predictions)
+    predicted_index = int(np.argmax(predictions))
+    stage1_confidence = float(predictions[predicted_index])
+    raw_label = labels_map.get(predicted_index, "unknown")
 
     # --- OOD & Confidence Threshold Check ---
     # Out-of-Distribution (OOD) objects (leaves, debris, household items)
