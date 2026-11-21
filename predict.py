@@ -213,12 +213,7 @@ def predict_species(image_batch, edibility_label: str | None = None) -> dict | N
         common_name = info["common_name"]
         species_key = info["key"]
     else:
-        cls_title = (edibility_label or "mushroom").capitalize()
-        display_name = (
-            f"Unknown / Uncatalogued {cls_title} Species"
-            if edibility_label in ("edible", "poisonous")
-            else "Unknown / Uncatalogued Species"
-        )
+        display_name = "Unknown Wild Mushroom"
         scientific_name = None
         common_name = None
         species_key = "unknown_species"
@@ -361,6 +356,26 @@ def predict_mushroom(image_path, detect_only=False):
     else:
         confidence = stage1_confidence
 
+    # === FORAGING SAFETY GATE ===
+    # Never certify an uncatalogued or low-confidence wild mushroom as "Edible".
+    # For a mushroom to be classified as 'edible':
+    # 1. The species must match a verified catalog edible taxon with confidence >= SPECIES_THRESHOLD (0.65)
+    # 2. Both Stage-1 edibility confidence and overall confidence must meet the safety threshold (>= THRESHOLD, default 0.70)
+    # If uncatalogued or low confidence, downgrade to 'unknown' (or 'poisonous' if poison signal >= 0.20):
+    warning = None
+    if is_mushroom and label.lower() == "edible":
+        is_confident_sp = bool(species_result and species_result.get("is_confident_species"))
+        if not is_confident_sp or confidence < THRESHOLD or stage1_confidence < THRESHOLD:
+            if poison_idx is not None and float(raw_predictions[poison_idx]) >= 0.20:
+                label = "poisonous"
+                warning = "Warning: Suspected toxic or inedible wild mushroom. Do NOT consume."
+            else:
+                label = "unknown"
+                warning = "Unknown wild mushroom. Confidence too low to verify edibility. Do NOT consume."
+        elif poison_idx is not None and float(raw_predictions[poison_idx]) >= 0.20:
+            label = "poisonous"
+            warning = "Caution: Significant toxic similarity detected. Do NOT consume."
+
     if not is_mushroom:
         result_name = "Uncertain / Not a Mushroom" if is_uncertain_ood else "Not a mushroom"
         species_name = "not_mushroom"
@@ -371,23 +386,18 @@ def predict_mushroom(image_path, detect_only=False):
             if is_uncertain_ood
             else "No mushroom detected in the image."
         )
-    elif species_result is not None:
+    elif species_result is not None and species_result.get("is_confident_species"):
         result_name = species_result["display_name"]
         species_name = species_result["scientific_name"] or result_name
         scientific_name = species_result["scientific_name"]
         common_name = species_result["common_name"]
-        warning = "Do not eat wild mushrooms based only on AI prediction."
+        warning = warning or "Do not eat wild mushrooms based only on AI prediction."
     else:
-        cls_title = (label or "mushroom").capitalize()
-        result_name = (
-            f"Unknown / Uncatalogued {cls_title} Species"
-            if label in ("edible", "poisonous")
-            else "Unknown / Uncatalogued Species"
-        )
+        result_name = "Unknown Wild Mushroom"
         species_name = result_name
         scientific_name = None
         common_name = None
-        warning = "Do not eat wild mushrooms based only on AI prediction."
+        warning = warning or "Unknown wild mushroom. Do not eat wild mushrooms based only on AI prediction."
 
     return {
         "ok":                         True,
