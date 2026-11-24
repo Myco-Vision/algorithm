@@ -196,11 +196,11 @@ def search_files(session: requests.Session, term: str, offset: int):
         "iiprop": "url|mime|extmetadata",
         "iiurlwidth": THUMB_WIDTH,
     }
-    for attempt in range(3):
+    for attempt in range(6):
         try:
             resp = session.get(API_URL, params=params, headers=HEADERS, timeout=25)
             if resp.status_code == 429:
-                time.sleep(2.0 * (attempt + 1))
+                time.sleep(2.5 * (attempt + 1))
                 continue
             resp.raise_for_status()
             data = resp.json()
@@ -208,7 +208,7 @@ def search_files(session: requests.Session, term: str, offset: int):
             next_offset = data.get("continue", {}).get("gsroffset")
             return list(pages), next_offset
         except requests.RequestException:
-            time.sleep(1.0 * (attempt + 1))
+            time.sleep(1.5 * (attempt + 1))
     return [], None
 
 
@@ -341,12 +341,17 @@ def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     if args.clean_legacy:
+        valid_prefixes = tuple(
+            f"{idx:03d}_{slugify(term)}_"
+            for idx, term in enumerate(OBJECTS_125, start=1)
+        )
         removed = 0
-        for f in OUT_DIR.glob("commons_*"):
-            if f.is_file():
-                f.unlink()
-                removed += 1
-        print(f"Cleaned {removed} legacy unorganized commons_* image(s).")
+        for f in OUT_DIR.iterdir():
+            if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS:
+                if not f.name.startswith(valid_prefixes):
+                    f.unlink()
+                    removed += 1
+        print(f"Cleaned {removed} legacy unorganized image(s).")
 
     credits_path = OUT_DIR / "_credits_commons.csv"
     new_credits_file = not credits_path.exists() or args.clean_legacy
