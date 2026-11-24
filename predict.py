@@ -142,9 +142,6 @@ def load_species_assets():
 def preprocess_image(image_path, method: str = "fit"):
     """
     Preprocess an image into a (1, 224, 224, 3) float32 batch.
-    - method='fit': aspect-preserving center crop (prevents widescreen 16:9 camera frames
-      of round/dome objects like a computer mouse or fruit from squishing into mushroom shapes).
-    - method='squish': full uncropped frame (preserves multi-mushroom layouts near image edges).
     """
     image_path = Path(image_path).expanduser().resolve()
 
@@ -168,6 +165,66 @@ def preprocess_image(image_path, method: str = "fit"):
 
     image_array = image_array / 255.0
     return np.expand_dims(image_array, axis=0), image_path
+
+
+def preprocess_multi_region(image_path, detect_only: bool = False):
+    """
+    Generate a batch of region views so off-center mushroom subjects (e.g., mushrooms
+    placed on the left or right side of a wide cutting board or forest floor) are
+    localized cleanly instead of being diluted by empty background.
+    - For detect_only=True (live 16:9 camera video): returns [fit_center, zoom_center].
+    - For detect_only=False (uploaded image): returns 7 views:
+      [fit_center, full_squish, fit_left, fit_right, zoom_center, zoom_left, zoom_right].
+    """
+    image_path = Path(image_path).expanduser().resolve()
+
+    if not image_path.exists():
+        raise PredictionError(f"Image file not found: {image_path}")
+    if not image_path.is_file():
+        raise PredictionError(f"Image path is not a file: {image_path}")
+
+    try:
+        with Image.open(image_path) as pil_img:
+            img = ImageOps.exif_transpose(pil_img).convert("RGB")
+            w, h = img.size
+            resample = Image.Resampling.BILINEAR
+
+            fit_center = ImageOps.fit(img, IMAGE_SIZE, method=resample, centering=(0.5, 0.5))
+            zoom_center = img.crop((int(w * 0.12), int(h * 0.12), int(w * 0.88), int(h * 0.88))).resize(IMAGE_SIZE, resample)
+
+            if detect_only:
+                views = [
+                    ("fit_center", fit_center),
+                    ("zoom_center", zoom_center),
+                ]
+            else:
+                full_squish = img.resize(IMAGE_SIZE, resample)
+                fit_left = ImageOps.fit(img, IMAGE_SIZE, method=resample, centering=(0.15, 0.5))
+                fit_right = ImageOps.fit(img, IMAGE_SIZE, method=resample, centering=(0.85, 0.5))
+                zoom_left = img.crop((0, int(h * 0.08), int(w * 0.68), int(h * 0.92))).resize(IMAGE_SIZE, resample)
+                zoom_right = img.crop((int(w * 0.32), int(h * 0.08), w, int(h * 0.92))).resize(IMAGE_SIZE, resample)
+                zoom_left_tight = img.crop((0, int(h * 0.20), int(w * 0.62), int(h * 0.80))).resize(IMAGE_SIZE, resample)
+                zoom_right_tight = img.crop((int(w * 0.38), int(h * 0.20), w, int(h * 0.80))).resize(IMAGE_SIZE, resample)
+                views = [
+                    ("fit_center", fit_center),
+                    ("full_squish", full_squish),
+                    ("fit_left", fit_left),
+                    ("fit_right", fit_right),
+                    ("zoom_center", zoom_center),
+                    ("zoom_left", zoom_left),
+                    ("zoom_right", zoom_right),
+                    ("zoom_left_tight", zoom_left_tight),
+                    ("zoom_right_tight", zoom_right_tight),
+                ]
+
+            names = [v[0] for v in views]
+            batch = np.stack([np.array(v[1], dtype=np.float32) / 255.0 for v in views], axis=0)
+    except Exception as exc:
+        raise PredictionError(
+            "The uploaded file is not a readable image. Use JPG, PNG, or JPEG."
+        ) from exc
+
+    return names, batch, image_path
 
 
 def predict_species(image_batch, edibility_label: str | None = None) -> dict | None:
@@ -250,12 +307,11 @@ def predict_species(image_batch, edibility_label: str | None = None) -> dict | N
 
 
 def predict_mushroom(image_path, detect_only: bool = False):
-    batch_fit, resolved_image_path = preprocess_image(image_path, method="fit")
-    batch_full, _ = preprocess_image(image_path, method="squish")
+    view_names, region_batch, resolved_image_path = preprocess_multi_region(image_path, detect_only=detect_only)
     model, labels_map = load_assets()
 
-    raw_fit = model.predict(batch_fit, verbose=0)[0]
-    raw_full = model.predict(batch_full, verbose=0)[0]
+    # Single batched Stage-1 forward pass across all candidate crops (~25ms)
+    raw_all = model.predict(region_batch, verbose=0)
 
     # Resolve class indices
     not_mush_idx = None
@@ -270,18 +326,21 @@ def predict_mushroom(image_path, detect_only: bool = False):
         elif n == "poisonous":
             poison_idx = idx
 
-    mush_fit = 1.0 - (float(raw_fit[not_mush_idx]) if not_mush_idx is not None else 0.0)
-    mush_full = 1.0 - (float(raw_full[not_mush_idx]) if not_mush_idx is not None else 0.0)
+    # Mushroom presence probability (P(edible) + P(poisonous)) per view
+    mush_scores = [
+        1.0 - (float(r[not_mush_idx]) if not_mush_idx is not None else 0.0)
+        for r in raw_all
+    ]
 
-    # For live camera preview (detect_only=True), strictly use aspect-preserved 'fit'
-    # so 16:9 widescreen frames of mice/fruits are never squished into dome shapes.
-    # For uploaded photos, select whichever crop ('fit' or 'squish') has stronger mushroom presence.
-    if detect_only or mush_fit >= mush_full:
-        raw_predictions = raw_fit
-        image_batch = batch_fit
-    else:
-        raw_predictions = raw_full
-        image_batch = batch_full
+    center_mush_prob = mush_scores[0]  # fit_center
+    full_mush_prob = mush_scores[1] if len(mush_scores) > 1 else center_mush_prob
+    global_frame_mush_prob = max(center_mush_prob, full_mush_prob)
+
+    # Pick the region crop with the strongest mushroom subject signal
+    best_view_idx = int(np.argmax(mush_scores))
+    best_view_name = view_names[best_view_idx]
+    raw_predictions = raw_all[best_view_idx]
+    image_batch = region_batch[best_view_idx : best_view_idx + 1]
 
     raw_max_prob = float(np.max(raw_predictions))
     predictions = calibrate_probabilities(raw_predictions)
@@ -313,7 +372,7 @@ def predict_mushroom(image_path, detect_only: bool = False):
 
     species_result = None
 
-    # --- Step 2: Stage-2 Cross-Validation & Tabletop Mushroom Rescue ---
+    # --- Step 2: Stage-2 Cross-Validation & Tabletop Mushroom Handling ---
     if is_mushroom:
         species_result = predict_species(image_batch, edibility_label=label.lower())
         if species_result is not None:
@@ -329,11 +388,22 @@ def predict_mushroom(image_path, detect_only: bool = False):
                 resolved_cls = species_result.get("resolved_classification")
                 if resolved_cls == "poisonous" and label.lower() != "poisonous":
                     label = "poisonous"
+
+                # If the mushroom was only localized via an off-center subfield crop
+                # (because the full/center frame was dominated by an indoor wooden cutting board,
+                # global_frame_mush_prob < 0.45), treat uncatalogued tabletop varieties
+                # (like Porcini on a cutting board) as "Unknown Edible/Poisonous Species".
+                if global_frame_mush_prob < 0.45 and best_view_name not in ("fit_center", "full_squish"):
+                    species_result["display_name"] = f"Unknown {label.capitalize()} Species"
+                    species_result["scientific_name"] = None
+                    species_result["common_name"] = None
+                    species_result["is_confident_species"] = False
+
     elif not detect_only:
-        # Uploaded image rejected by Stage-1 (e.g., harvested mushrooms on an indoor wooden cutting board).
-        # Evaluate Stage-2 on both 'fit' and 'squish' views without any edibility filter.
-        sp_fit = predict_species(batch_fit, edibility_label=None)
-        sp_full = predict_species(batch_full, edibility_label=None)
+        # Fallback: if all Stage-1 views were below threshold due to indoor background,
+        # check Stage-2 across fit_center and full_squish.
+        sp_fit = predict_species(region_batch[0:1], edibility_label=None)
+        sp_full = predict_species(region_batch[1:2], edibility_label=None) if len(region_batch) > 1 else None
         candidates = [c for c in (sp_fit, sp_full) if c is not None]
         if candidates:
             best_sp = max(candidates, key=lambda c: float(c.get("raw_max_species_prob", 0.0)))
@@ -346,10 +416,6 @@ def predict_mushroom(image_path, detect_only: bool = False):
                     label = "poisonous"
                 else:
                     label = "edible"
-                # If Stage-1 had very low mushroom signal (< 0.25) because the specimen is an
-                # uncatalogued/tabletop variety (e.g., Porcini on a cutting board) and Stage-2 raw
-                # score is below 0.95, report as "Unknown Edible/Poisonous Species" rather than
-                # forcing a closed-set catalog species name onto an uncatalogued mushroom.
                 if not best_sp.get("is_confident_species") or (mush_prob < 0.25 and raw_sp_max < 0.95):
                     species_result["display_name"] = f"Unknown {label.capitalize()} Species"
                     species_result["scientific_name"] = None
