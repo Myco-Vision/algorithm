@@ -28,6 +28,7 @@ IMAGE_SIZE = (224, 224)
 THRESHOLD = float(os.environ.get("MUSHROOM_CONFIDENCE_THRESHOLD", "0.70"))
 OOD_MIN_MAX_THRESHOLD = float(os.environ.get("OOD_MIN_CONFIDENCE_THRESHOLD", "0.65"))
 SPECIES_THRESHOLD = float(os.environ.get("SPECIES_CONFIDENCE_THRESHOLD", "0.65"))
+STAGE2_RESCUE_RAW_THRESHOLD = float(os.environ.get("STAGE2_RESCUE_RAW_THRESHOLD", "0.85"))
 CALIBRATION_TEMP = float(os.environ.get("CALIBRATION_TEMPERATURE", "1.4"))
 CALIBRATION_EPS = float(os.environ.get("CALIBRATION_SMOOTHING", "0.015"))
 
@@ -141,9 +142,9 @@ def load_species_assets():
 def preprocess_image(image_path, method: str = "fit"):
     """
     Preprocess an image into a (1, 224, 224, 3) float32 batch.
-    method='fit' uses aspect-preserving center crop so widescreen 16:9 camera
-    frames (e.g., a computer mouse or round fruit) are never squished into
-    a vertical mushroom-cap shape.
+    - method='fit': aspect-preserving center crop (prevents widescreen 16:9 camera frames
+      of round/dome objects like a computer mouse or fruit from squishing into mushroom shapes).
+    - method='squish': full uncropped frame (preserves multi-mushroom layouts near image edges).
     """
     image_path = Path(image_path).expanduser().resolve()
 
@@ -172,9 +173,8 @@ def preprocess_image(image_path, method: str = "fit"):
 def predict_species(image_batch, edibility_label: str | None = None) -> dict | None:
     """
     Run Stage-2 species identification on a preprocessed mushroom image batch.
-    If `edibility_label` ('edible' or 'poisonous') is provided and the trained
-    species model includes species of that classification, selects the most
-    probable compatible species so the species name and edibility match.
+    Includes an unfiltered global poison check first so a poisonous species on an
+    indoor surface (e.g., cutting board) is never masked by an 'edible' filter.
     """
     assets = load_species_assets()
     if assets is None:
@@ -185,11 +185,31 @@ def predict_species(image_batch, edibility_label: str | None = None) -> dict | N
     raw_max_species = float(np.max(raw_probs))
     probs = calibrate_probabilities(raw_probs)
 
-    candidate_indices = list(range(len(probs)))
-    if edibility_label in ("edible", "poisonous"):
+    all_indices = list(range(len(probs)))
+    global_best_idx = max(all_indices, key=lambda idx: float(probs[idx]))
+    global_best_info = species_info_map.get(global_best_idx) or get_species_info("Unknown")
+    global_best_cls = global_best_info.get("classification")
+
+    # Calculate total Stage-2 poisonous probability mass
+    poison_species_raw_sum = sum(
+        float(raw_probs[idx])
+        for idx in all_indices
+        if species_info_map.get(idx, {}).get("classification") == "poisonous"
+    )
+
+    # Safety rule: if the unfiltered Stage-2 winner is poisonous (with raw prob >= 0.40)
+    # or aggregate Stage-2 poisonous species probability is >= 0.45, force poisonous classification
+    effective_label = edibility_label
+    if global_best_cls == "poisonous" and float(raw_probs[global_best_idx]) >= 0.40:
+        effective_label = "poisonous"
+    elif poison_species_raw_sum >= 0.45:
+        effective_label = "poisonous"
+
+    candidate_indices = all_indices
+    if effective_label in ("edible", "poisonous"):
         compatible = [
             idx for idx in candidate_indices
-            if species_info_map.get(idx, {}).get("classification") in (edibility_label, None)
+            if species_info_map.get(idx, {}).get("classification") in (effective_label, None)
         ]
         if compatible:
             candidate_indices = compatible
@@ -197,6 +217,7 @@ def predict_species(image_batch, edibility_label: str | None = None) -> dict | N
     best_idx = max(candidate_indices, key=lambda idx: float(probs[idx]))
     species_conf = float(probs[best_idx])
     info = species_info_map.get(best_idx) or get_species_info("Unknown")
+    resolved_classification = info.get("classification") or effective_label or "unknown"
     is_confident = species_conf >= SPECIES_THRESHOLD
 
     if is_confident:
@@ -205,7 +226,7 @@ def predict_species(image_batch, edibility_label: str | None = None) -> dict | N
         common_name = info["common_name"]
         species_key = info["key"]
     else:
-        cls_title = (edibility_label or "mushroom").capitalize()
+        cls_title = (resolved_classification or "mushroom").capitalize()
         display_name = f"Unknown {cls_title} Species"
         scientific_name = None
         common_name = None
@@ -216,27 +237,25 @@ def predict_species(image_batch, edibility_label: str | None = None) -> dict | N
         "scientific_name":            scientific_name,
         "common_name":                common_name,
         "display_name":               display_name,
+        "resolved_classification":    resolved_classification,
         "is_confident_species":       is_confident,
         "closest_species":            info["scientific_name"],
         "species_confidence":         round(species_conf, 4),
         "species_confidence_percent": round(species_conf * 100, 2),
         "raw_max_species_prob":       round(raw_max_species, 4),
+        "poison_species_raw_sum":     round(poison_species_raw_sum, 4),
         "species_threshold":          SPECIES_THRESHOLD,
         "species_raw_score":          [round(float(p), 6) for p in probs],
     }
 
 
 def predict_mushroom(image_path, detect_only: bool = False):
-    # Use aspect-preserving center crop as primary view so 16:9 camera frames aren't distorted
-    image_batch, resolved_image_path = preprocess_image(image_path, method="fit")
+    batch_fit, resolved_image_path = preprocess_image(image_path, method="fit")
+    batch_full, _ = preprocess_image(image_path, method="squish")
     model, labels_map = load_assets()
 
-    raw_predictions = model.predict(image_batch, verbose=0)[0]  # shape (3,) — softmax probs
-    raw_max_prob = float(np.max(raw_predictions))
-    predictions = calibrate_probabilities(raw_predictions)
-    predicted_index = int(np.argmax(predictions))
-    stage1_confidence = float(predictions[predicted_index])
-    raw_label = labels_map.get(predicted_index, "unknown")
+    raw_fit = model.predict(batch_fit, verbose=0)[0]
+    raw_full = model.predict(batch_full, verbose=0)[0]
 
     # Resolve class indices
     not_mush_idx = None
@@ -251,12 +270,30 @@ def predict_mushroom(image_path, detect_only: bool = False):
         elif n == "poisonous":
             poison_idx = idx
 
+    mush_fit = 1.0 - (float(raw_fit[not_mush_idx]) if not_mush_idx is not None else 0.0)
+    mush_full = 1.0 - (float(raw_full[not_mush_idx]) if not_mush_idx is not None else 0.0)
+
+    # For live camera preview (detect_only=True), strictly use aspect-preserved 'fit'
+    # so 16:9 widescreen frames of mice/fruits are never squished into dome shapes.
+    # For uploaded photos, select whichever crop ('fit' or 'squish') has stronger mushroom presence.
+    if detect_only or mush_fit >= mush_full:
+        raw_predictions = raw_fit
+        image_batch = batch_fit
+    else:
+        raw_predictions = raw_full
+        image_batch = batch_full
+
+    raw_max_prob = float(np.max(raw_predictions))
+    predictions = calibrate_probabilities(raw_predictions)
+    predicted_index = int(np.argmax(predictions))
+    stage1_confidence = float(predictions[predicted_index])
+    raw_label = labels_map.get(predicted_index, "unknown")
+
     not_mush_prob = float(raw_predictions[not_mush_idx]) if not_mush_idx is not None else 0.0
+    poison_prob = float(raw_predictions[poison_idx]) if poison_idx is not None else 0.0
     mush_prob = 1.0 - not_mush_prob
 
-    # --- Strict OOD & Subject Verification Gate ---
-    # Prevents non-mushroom objects (e.g., durian fruit, computer mouse, desk objects)
-    # from passing as "subject is mushroom" when Stage-1 probabilities are split or weak.
+    # --- Step 1: Primary Stage-1 OOD Gate ---
     if raw_label.lower() == "not_mushroom":
         is_mushroom = False
         label = "not_mushroom"
@@ -270,19 +307,55 @@ def predict_mushroom(image_path, detect_only: bool = False):
     else:
         is_mushroom = True
         label = raw_label
+        # Stage-1 poison safety threshold (>= 25%)
+        if label.lower() == "edible" and poison_prob >= 0.25:
+            label = "poisonous"
 
     species_result = None
+
+    # --- Step 2: Stage-2 Cross-Validation & Tabletop Mushroom Rescue ---
     if is_mushroom:
         species_result = predict_species(image_batch, edibility_label=label.lower())
-        # Secondary OOD check: if Stage-1 is not overwhelmingly confident (< 0.88) AND
-        # Stage-2 species classifier sees no recognizable mushroom features (raw max < 0.50),
-        # reject the frame as a non-mushroom object (e.g., durian or mouse device).
         if species_result is not None:
             raw_sp_max = float(species_result.get("raw_max_species_prob", 1.0))
+            # Reject non-mushroom objects if Stage-1 is not overwhelmingly confident (< 0.88)
+            # AND Stage-2 sees no clear mushroom morphology (< 0.50).
             if raw_max_prob < 0.88 and raw_sp_max < 0.50:
                 is_mushroom = False
                 label = "not_mushroom"
                 species_result = None
+            else:
+                # Apply Stage-2 poison safety override if Stage-2 strongly matched a poisonous species
+                resolved_cls = species_result.get("resolved_classification")
+                if resolved_cls == "poisonous" and label.lower() != "poisonous":
+                    label = "poisonous"
+    elif not detect_only:
+        # Uploaded image rejected by Stage-1 (e.g., harvested mushrooms on an indoor wooden cutting board).
+        # Evaluate Stage-2 on both 'fit' and 'squish' views without any edibility filter.
+        sp_fit = predict_species(batch_fit, edibility_label=None)
+        sp_full = predict_species(batch_full, edibility_label=None)
+        candidates = [c for c in (sp_fit, sp_full) if c is not None]
+        if candidates:
+            best_sp = max(candidates, key=lambda c: float(c.get("raw_max_species_prob", 0.0)))
+            raw_sp_max = float(best_sp.get("raw_max_species_prob", 0.0))
+            if raw_sp_max >= STAGE2_RESCUE_RAW_THRESHOLD:
+                is_mushroom = True
+                species_result = best_sp
+                rescued_cls = best_sp.get("resolved_classification")
+                if rescued_cls == "poisonous" or float(best_sp.get("poison_species_raw_sum", 0.0)) >= 0.30 or poison_prob >= 0.20:
+                    label = "poisonous"
+                else:
+                    label = "edible"
+                # If Stage-1 had very low mushroom signal (< 0.25) because the specimen is an
+                # uncatalogued/tabletop variety (e.g., Porcini on a cutting board) and Stage-2 raw
+                # score is below 0.95, report as "Unknown Edible/Poisonous Species" rather than
+                # forcing a closed-set catalog species name onto an uncatalogued mushroom.
+                if not best_sp.get("is_confident_species") or (mush_prob < 0.25 and raw_sp_max < 0.95):
+                    species_result["display_name"] = f"Unknown {label.capitalize()} Species"
+                    species_result["scientific_name"] = None
+                    species_result["common_name"] = None
+                    species_result["is_confident_species"] = False
+                stage1_confidence = float(best_sp["species_confidence"])
 
     if detect_only:
         return {
@@ -300,7 +373,10 @@ def predict_mushroom(image_path, detect_only: bool = False):
     # Combine Stage-1 (edibility) and Stage-2 (species) confidence when species model is active
     if is_mushroom and species_result is not None:
         sp_conf = float(species_result["species_confidence"])
-        confidence = (0.4 * stage1_confidence) + (0.6 * sp_conf)
+        if mush_prob < THRESHOLD:
+            confidence = sp_conf
+        else:
+            confidence = (0.4 * stage1_confidence) + (0.6 * sp_conf)
     else:
         confidence = stage1_confidence
 
