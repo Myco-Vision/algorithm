@@ -5,18 +5,19 @@ Trains the Stage-2 MobileNetV2 species classifier (`models/mushroom_species_mode
 directly from the species subfolders inside `mushroom_dataset/edible/<Species>`
 and `mushroom_dataset/poisonous/<Species>` (no duplicate dataset folder needed).
 
-Pre-configured subfolders inside `mushroom_dataset/`:
-  - edible/Termitomyces              (Mamuno)
-  - edible/Auricularia               (Talingang Daga / Wood Ear)
-  - edible/Pleurotus_ostreatus       (Oyster Mushroom)
-  - edible/Pleurotus_pulmonarius     (Phoenix Oyster)
-  - poisonous/Amanita_virosa            (Destroying Angel)
-  - poisonous/Leucocoprinus_birnbaumii  (Flowerpot Parasol)
-  - poisonous/Gymnopilus                (Rustgill)
-
-Any additional subfolder added to `mushroom_dataset/edible/<Species_Name>/` or
-`mushroom_dataset/poisonous/<Species_Name>/` with images will also be included
-automatically. Empty subfolders are skipped during training.
+Pre-configured subfolders inside `mushroom_dataset/` (10 species, 250 images each):
+  Edible:
+    - edible/Termitomyces              (Mamuno)
+    - edible/Auricularia               (Talingang Daga / Wood Ear)
+    - edible/Pleurotus_ostreatus       (Oyster Mushroom)
+    - edible/Pleurotus_pulmonarius     (Phoenix Oyster)
+    - edible/Hypsizygus_tessellatus    (Buna Shimeji)
+  Poisonous:
+    - poisonous/Amanita_virosa            (Destroying Angel)
+    - poisonous/Leucocoprinus_birnbaumii  (Flowerpot Parasol)
+    - poisonous/Gymnopilus                (Rustgill)
+    - poisonous/Ganoderma                 (Reishi / Artist's Conk)
+    - poisonous/Trametes                  (Turkey Tail Bracket)
 
 Usage:
     python train_species.py
@@ -202,8 +203,9 @@ def train_species_model(
         height_shift_range=0.2,
         shear_range=0.2,
         zoom_range=0.2,
+        brightness_range=[0.8, 1.2],
         horizontal_flip=True,
-        fill_mode="nearest",
+        fill_mode="reflect",
         validation_split=VALIDATION_SPLIT,
     )
 
@@ -238,6 +240,15 @@ def train_species_model(
     print(f"Species class mapping detected: {class_indices}")
     print(f"Training samples: {train_generator.samples} | Validation samples: {val_generator.samples}")
 
+    # Compute balanced class weights across all species classes
+    class_counts = np.bincount(train_generator.classes, minlength=num_classes)
+    total_train = float(train_generator.samples)
+    class_weights = {
+        idx: float(total_train / (num_classes * max(count, 1)))
+        for idx, count in enumerate(class_counts)
+    }
+    print(f"Balanced species class weights: {class_weights}")
+
     print("\nBuilding species model using pre-trained MobileNetV2...")
     base_model = tf.keras.applications.MobileNetV2(
         input_shape=(224, 224, 3),
@@ -261,19 +272,49 @@ def train_species_model(
     )
 
     has_val = val_generator.samples > 0
+    warmup_epochs = max(8, epochs - 6)
+    ft_epochs = max(4, epochs - warmup_epochs)
+
     early_stop = callbacks.EarlyStopping(
         monitor="val_accuracy" if has_val else "accuracy",
-        patience=5,
+        patience=4,
         restore_best_weights=True,
         verbose=1,
     )
 
-    print(f"\nStarting training loop for {num_classes} species (up to {epochs} epochs)...")
-    history = model.fit(
+    print(f"\nStarting Phase 1: species head warmup ({warmup_epochs} epochs)...")
+    history_warmup = model.fit(
         train_generator,
-        epochs=epochs,
+        epochs=warmup_epochs,
         validation_data=val_generator if has_val else None,
+        class_weight=class_weights,
         callbacks=[early_stop],
+    )
+
+    print(f"\nStarting Phase 2: fine-tuning top MobileNetV2 layers ({ft_epochs} epochs)...")
+    base_model.trainable = True
+    for layer in base_model.layers[:-30]:
+        layer.trainable = False
+
+    model.compile(
+        optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4),
+        loss="categorical_crossentropy",
+        metrics=["accuracy"],
+    )
+
+    early_stop_ft = callbacks.EarlyStopping(
+        monitor="val_accuracy" if has_val else "accuracy",
+        patience=4,
+        restore_best_weights=True,
+        verbose=1,
+    )
+
+    history_ft = model.fit(
+        train_generator,
+        epochs=ft_epochs,
+        validation_data=val_generator if has_val else None,
+        class_weight=class_weights,
+        callbacks=[early_stop_ft],
     )
 
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
@@ -291,8 +332,10 @@ def train_species_model(
 
     SPECIES_META_PATH.write_text(json.dumps(species_metadata, indent=2), encoding="utf-8")
 
-    best_acc = float(max(history.history.get("accuracy", [0.0])))
-    best_val_acc = float(max(history.history.get("val_accuracy", [best_acc])))
+    all_acc = history_warmup.history.get("accuracy", [0.0]) + history_ft.history.get("accuracy", [0.0])
+    all_val_acc = history_warmup.history.get("val_accuracy", []) + history_ft.history.get("val_accuracy", [])
+    best_acc = float(max(all_acc))
+    best_val_acc = float(max(all_val_acc)) if all_val_acc else best_acc
 
     print("\n" + "=" * 50)
     print("Species Model Training Complete!")

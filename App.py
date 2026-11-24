@@ -134,6 +134,8 @@ def classify():
     if not result["is_mushroom"]:
         return jsonify(
             {
+                "is_mushroom":           False,
+                "status_label":          "subject not mushroom",
                 "result_name":           "Not a mushroom",
                 "result_classification": "not_mushroom",
                 "confidence":            result["confidence_percent"],
@@ -144,6 +146,8 @@ def classify():
 
     return jsonify(
         {
+            "is_mushroom":           True,
+            "status_label":          "subject is mushroom",
             "species":               result["species"],
             "scientific_name":       result["scientific_name"],
             "common_name":           result["common_name"],

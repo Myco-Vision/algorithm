@@ -27,8 +27,9 @@ train_datagen = tf.keras.preprocessing.image.ImageDataGenerator(
     height_shift_range=0.2,
     shear_range=0.2,
     zoom_range=0.2,
+    brightness_range=[0.8, 1.2],
     horizontal_flip=True,
-    fill_mode='nearest',
+    fill_mode='reflect',
     validation_split=VALIDATION_SPLIT,
 )
 
@@ -59,8 +60,18 @@ validation_generator = val_datagen.flow_from_directory(
 )
 
 class_indices = train_generator.class_indices
+num_classes = len(class_indices)
 print(f"Class mapping detected: {class_indices}")
 print(f"Training samples: {train_generator.samples} | Validation samples: {validation_generator.samples}")
+
+# Compute balanced class weights to prevent any majority class bias
+class_counts = np.bincount(train_generator.classes, minlength=num_classes)
+total_train = float(train_generator.samples)
+class_weights = {
+    idx: float(total_train / (num_classes * max(count, 1)))
+    for idx, count in enumerate(class_counts)
+}
+print(f"Balanced class weights: {class_weights}")
 
 
 # --- STEP 2: BUILD TRANSFER LEARNING MODEL ---
@@ -76,9 +87,9 @@ base_model.trainable = False
 model = models.Sequential([
     base_model,
     layers.GlobalAveragePooling2D(),
-    layers.Dense(64, activation='relu'),
-    layers.Dropout(0.5),
-    layers.Dense(3, activation='softmax')
+    layers.Dense(128, activation='relu'),
+    layers.Dropout(0.4),
+    layers.Dense(num_classes, activation='softmax')
 ])
 
 model.compile(
@@ -88,23 +99,50 @@ model.compile(
 )
 
 
-# --- STEP 3: TRAIN THE MODEL ---
-print("Starting training loop...")
-epochs = 20
-
+# --- STEP 3: TRAIN THE MODEL (WARMUP + FINE-TUNING) ---
+print("Starting Phase 1: classification head warmup...")
+epochs_warmup = 12
 has_val = validation_generator.samples > 0
+
 early_stop = callbacks.EarlyStopping(
     monitor='val_accuracy' if has_val else 'accuracy',
-    patience=5,
+    patience=4,
     restore_best_weights=True,
     verbose=1,
 )
 
-history = model.fit(
+history_warmup = model.fit(
     train_generator,
-    epochs=epochs,
+    epochs=epochs_warmup,
     validation_data=validation_generator if has_val else None,
+    class_weight=class_weights,
     callbacks=[early_stop],
+)
+
+print("Starting Phase 2: fine-tuning top MobileNetV2 layers for texture & OOD discrimination...")
+base_model.trainable = True
+for layer in base_model.layers[:-30]:
+    layer.trainable = False
+
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4),
+    loss='categorical_crossentropy',
+    metrics=['accuracy'],
+)
+
+early_stop_ft = callbacks.EarlyStopping(
+    monitor='val_accuracy' if has_val else 'accuracy',
+    patience=4,
+    restore_best_weights=True,
+    verbose=1,
+)
+
+history_ft = model.fit(
+    train_generator,
+    epochs=8,
+    validation_data=validation_generator if has_val else None,
+    class_weight=class_weights,
+    callbacks=[early_stop_ft],
 )
 
 
@@ -116,8 +154,10 @@ model.save(model_path)
 
 np.save(os.path.join(MODEL_DIR, "class_indices.npy"), class_indices)
 
-best_train_acc = max(history.history.get("accuracy", [0.0])) * 100
-best_val_acc = max(history.history.get("val_accuracy", [best_train_acc / 100])) * 100
+all_train_acc = history_warmup.history.get("accuracy", [0.0]) + history_ft.history.get("accuracy", [0.0])
+all_val_acc = history_warmup.history.get("val_accuracy", []) + history_ft.history.get("val_accuracy", [])
+best_train_acc = max(all_train_acc) * 100
+best_val_acc = (max(all_val_acc) * 100) if all_val_acc else best_train_acc
 
 print("\n" + "="*50)
 print(f"Training Complete! Best weights saved to: {model_path}")

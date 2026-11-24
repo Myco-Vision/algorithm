@@ -1,32 +1,33 @@
 """
 iNaturalist Mushroom Image Downloader - Mindanao + Philippines + wider region
 =============================================================================
-Downloads images for MycoVision's pre-configured mushroom species into
-`species_dataset/<Species_Folder>/` for training the species identification
-model (`train_species.py`).
+Downloads images for MycoVision's 10 pre-configured mushroom species into
+`mushroom_dataset/{edible,poisonous}/<Species_Folder>/` and balances each
+species folder to a target image cap (default: 250 images per species =
+1,250 edible and 1,250 poisonous).
 
-Pre-configured targets:
-  termitomyces             -> Termitomyces (Mamuno)                   -> species_dataset/Termitomyces/
-  auricularia              -> Auricularia (Talingang Daga / Wood Ear) -> species_dataset/Auricularia/
-  oyster                   -> Pleurotus ostreatus / P. pulmonarius    -> species_dataset/Pleurotus_ostreatus/
-  amanita_virosa           -> Amanita virosa (Destroying Angel)       -> species_dataset/Amanita_virosa/
-  leucocoprinus_birnbaumii -> Leucocoprinus birnbaumii                -> species_dataset/Leucocoprinus_birnbaumii/
-  gymnopilus               -> genus Gymnopilus (Rustgill)             -> species_dataset/Gymnopilus/
-
-- Pass order per target: Mindanao -> Philippines -> nearby countries -> worldwide (capped)
-- Deduped by observation id within each target
-- Resolves taxon/place IDs from the API at runtime
-- Skips already-downloaded images (safe to re-run)
+Pre-configured targets (5 Edible + 5 Poisonous):
+  Edible:
+    termitomyces             -> Termitomyces (Mamuno)
+    auricularia              -> Auricularia (Talingang Daga / Wood Ear)
+    oyster                   -> Pleurotus ostreatus (Oyster Mushroom)
+    pleurotus_pulmonarius    -> Pleurotus pulmonarius (Phoenix Oyster)
+    buna_shimeji             -> Hypsizygus tessellatus (Buna Shimeji)
+  Poisonous:
+    amanita_virosa           -> Amanita virosa (Destroying Angel)
+    leucocoprinus_birnbaumii -> Leucocoprinus birnbaumii (Flowerpot Parasol)
+    gymnopilus               -> Gymnopilus (Rustgill)
+    ganoderma                -> Ganoderma (Reishi / Artist's Conk)
+    trametes                 -> Trametes (Turkey Tail Bracket)
 
 Usage:
-    python download_mushrooms.py                           # run all 6 species targets
-    python download_mushrooms.py termitomyces auricularia  # run specific target(s)
-    python download_mushrooms.py oyster --cap 200          # cap worldwide pass to 200 obs
+    python download_mushrooms.py                           # balance all 10 species to 250 images each
+    python download_mushrooms.py --max-images 250          # cap & trim each species to 250 images
+    python download_mushrooms.py trametes buna_shimeji     # run specific target(s)
 """
 
 import argparse
 import csv
-import shutil
 import sys
 import time
 import logging
@@ -42,6 +43,8 @@ BASE_DIR            = Path(__file__).resolve().parent
 EDIBILITY_ROOT      = BASE_DIR / "mushroom_dataset"
 EDIBLE_DIR          = EDIBILITY_ROOT / "edible"
 POISONOUS_DIR       = EDIBILITY_ROOT / "poisonous"
+DEFAULT_MAX_IMAGES  = 250
+IMAGE_EXTENSIONS    = {".jpg", ".jpeg", ".png", ".webp"}
 
 # (label, place name to resolve, fallback place_id or None, cap on new obs per pass or None)
 PLACES = [
@@ -53,7 +56,7 @@ PLACES = [
     ("Vietnam",     "Vietnam",     None, None),
     ("Taiwan",      "Taiwan",      None, None),
     ("India",       "India",       None, None),
-    ("Worldwide",   None,          None, 300),
+    ("Worldwide",   None,          None, 400),
 ]
 
 TARGETS = {
@@ -75,6 +78,13 @@ TARGETS = {
         "folder":         "Pleurotus_ostreatus",
         "taxa":           SPECIES_CATALOG["Pleurotus_ostreatus"]["taxa"],
         "rank":           SPECIES_CATALOG["Pleurotus_ostreatus"]["rank"],
+        "classification": "edible",
+        "places":         PLACES,
+    },
+    "pleurotus_pulmonarius": {
+        "folder":         "Pleurotus_pulmonarius",
+        "taxa":           SPECIES_CATALOG["Pleurotus_pulmonarius"]["taxa"],
+        "rank":           SPECIES_CATALOG["Pleurotus_pulmonarius"]["rank"],
         "classification": "edible",
         "places":         PLACES,
     },
@@ -124,8 +134,8 @@ TARGETS = {
 
 QUALITIES          = ["research", "needs_id"]
 PER_PAGE           = 200
-SLEEP_BETWEEN      = 1.2
-IMG_SLEEP          = 0.4
+SLEEP_BETWEEN      = 1.0
+IMG_SLEEP          = 0.2
 MAX_IMAGES_PER_OBS = 3
 OUTPUT_DIR         = BASE_DIR / "mushroom_downloads"
 
@@ -232,22 +242,55 @@ def download_image(url: str, dest: Path) -> str:
         return "failed"
 
 
+def list_images(folder: Path) -> list[Path]:
+    if not folder.exists():
+        return []
+    return sorted(
+        f for f in folder.rglob("*")
+        if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS
+    )
+
+
 def count_images(folder: Path) -> int:
-    return sum(1 for f in folder.rglob("*") if f.is_file())
+    return len(list_images(folder))
+
+
+def trim_excess_images(folder: Path, max_images: int) -> int:
+    """If a species folder exceeds max_images, deterministically remove excess files to enforce balance."""
+    imgs = list_images(folder)
+    if len(imgs) <= max_images:
+        return 0
+    excess = imgs[max_images:]
+    for f in excess:
+        try:
+            f.unlink()
+        except Exception:
+            pass
+    return len(excess)
 
 
 # -- PER-TARGET RUN -----------------------------------------------------------
 
-def run_target(key: str, cfg: dict, max_images: int | None = None):
+def run_target(key: str, cfg: dict, max_images: int | None = DEFAULT_MAX_IMAGES, trim_excess: bool = True):
     edibility_dir = EDIBLE_DIR if cfg["classification"] == "edible" else POISONOUS_DIR
     species_dir = edibility_dir / cfg["folder"]
     species_dir.mkdir(parents=True, exist_ok=True)
+
+    if max_images and trim_excess:
+        trimmed = trim_excess_images(species_dir, max_images)
+        if trimmed > 0:
+            log.info(f"[{key}] Trimmed {trimmed} excess image(s) from {species_dir.name} to cap at {max_images}.")
+
     current_images = count_images(species_dir)
 
     log.info("")
     log.info("=" * 60)
-    log.info(f"TARGET: {key} ({cfg['classification']}) -> {species_dir}")
+    log.info(f"TARGET: {key} ({cfg['classification']}) -> {species_dir} (current: {current_images}, target: {max_images})")
     log.info("=" * 60)
+
+    if max_images and current_images >= max_images:
+        log.info(f"[{key}] Already at target count ({current_images}/{max_images}). Skipping download.")
+        return
 
     target_out = OUTPUT_DIR / key
     target_out.mkdir(parents=True, exist_ok=True)
@@ -354,7 +397,7 @@ def run_target(key: str, cfg: dict, max_images: int | None = None):
                             species_stats[species_name]["img_count"] += 1
                             total_downloaded += 1
                             current_images += 1
-                            log.info(f"  Downloaded: {species_name} | obs {obs_id} img {i}")
+                            log.info(f"  Downloaded ({current_images}/{max_images or '∞'}): {species_name} | obs {obs_id} img {i}")
                             if max_images and current_images >= max_images:
                                 break
                         elif result == "skipped":
@@ -412,9 +455,19 @@ def run_target(key: str, cfg: dict, max_images: int | None = None):
 # -- MAIN ---------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Download mushroom images from iNaturalist.")
+    parser = argparse.ArgumentParser(description="Download and balance mushroom images from iNaturalist.")
     parser.add_argument("targets", nargs="*", help=f"Target keys from: {list(TARGETS)}")
-    parser.add_argument("--max-images", type=int, default=None, help="Stop once folder reaches this many images")
+    parser.add_argument(
+        "--max-images",
+        type=int,
+        default=DEFAULT_MAX_IMAGES,
+        help=f"Target cap per species folder (default: {DEFAULT_MAX_IMAGES})",
+    )
+    parser.add_argument(
+        "--no-trim",
+        action="store_true",
+        help="Do not trim existing folders that already exceed --max-images",
+    )
     parsed = parser.parse_args()
 
     requested = [a.lower() for a in parsed.targets] or list(TARGETS)
@@ -424,7 +477,12 @@ def main():
         return
 
     for key in requested:
-        run_target(key, TARGETS[key], max_images=parsed.max_images)
+        run_target(
+            key,
+            TARGETS[key],
+            max_images=parsed.max_images,
+            trim_excess=not parsed.no_trim,
+        )
 
     log.info("")
     log.info("NEXT STEPS:")

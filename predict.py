@@ -9,7 +9,7 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "matplotlib"))
 
 import numpy as np
-from PIL import ImageFile
+from PIL import Image, ImageFile, ImageOps
 
 from species_catalog import get_species_info
 
@@ -25,7 +25,8 @@ SPECIES_CLASSES_PATH = BASE_DIR / "models" / "species_indices.npy"
 SPECIES_META_PATH = BASE_DIR / "models" / "species_metadata.json"
 
 IMAGE_SIZE = (224, 224)
-THRESHOLD = 0.5
+THRESHOLD = float(os.environ.get("MUSHROOM_CONFIDENCE_THRESHOLD", "0.70"))
+OOD_MIN_MAX_THRESHOLD = float(os.environ.get("OOD_MIN_CONFIDENCE_THRESHOLD", "0.65"))
 SPECIES_THRESHOLD = float(os.environ.get("SPECIES_CONFIDENCE_THRESHOLD", "0.65"))
 CALIBRATION_TEMP = float(os.environ.get("CALIBRATION_TEMPERATURE", "1.4"))
 CALIBRATION_EPS = float(os.environ.get("CALIBRATION_SMOOTHING", "0.015"))
@@ -84,7 +85,7 @@ def load_assets():
         return _ASSETS
 
     tf = get_tensorflow()
-    model = tf.keras.models.load_model(MODEL_PATH)
+    model = tf.keras.models.load_model(MODEL_PATH, compile=False)
     class_indices = np.load(CLASSES_PATH, allow_pickle=True).item()
     labels_map = {int(value): str(key) for key, value in class_indices.items()}
     _ASSETS = (model, labels_map)
@@ -116,7 +117,7 @@ def load_species_assets():
         return _SPECIES_ASSETS
 
     tf = get_tensorflow()
-    species_model = tf.keras.models.load_model(SPECIES_MODEL_PATH)
+    species_model = tf.keras.models.load_model(SPECIES_MODEL_PATH, compile=False)
     species_indices = np.load(SPECIES_CLASSES_PATH, allow_pickle=True).item()
 
     saved_meta = {}
@@ -137,7 +138,13 @@ def load_species_assets():
     return _SPECIES_ASSETS
 
 
-def preprocess_image(image_path):
+def preprocess_image(image_path, method: str = "fit"):
+    """
+    Preprocess an image into a (1, 224, 224, 3) float32 batch.
+    method='fit' uses aspect-preserving center crop so widescreen 16:9 camera
+    frames (e.g., a computer mouse or round fruit) are never squished into
+    a vertical mushroom-cap shape.
+    """
     image_path = Path(image_path).expanduser().resolve()
 
     if not image_path.exists():
@@ -146,18 +153,18 @@ def preprocess_image(image_path):
         raise PredictionError(f"Image path is not a file: {image_path}")
 
     try:
-        tf = get_tensorflow()
-        image = tf.keras.utils.load_img(
-            image_path,
-            target_size=IMAGE_SIZE,
-            color_mode="rgb",
-        )
+        with Image.open(image_path) as pil_img:
+            pil_img = ImageOps.exif_transpose(pil_img).convert("RGB")
+            if method == "fit":
+                pil_img = ImageOps.fit(pil_img, IMAGE_SIZE, method=Image.Resampling.BILINEAR, centering=(0.5, 0.5))
+            else:
+                pil_img = pil_img.resize(IMAGE_SIZE, Image.Resampling.BILINEAR)
+            image_array = np.array(pil_img, dtype=np.float32)
     except Exception as exc:
         raise PredictionError(
             "The uploaded file is not a readable image. Use JPG, PNG, or JPEG."
         ) from exc
 
-    image_array = tf.keras.utils.img_to_array(image)
     image_array = image_array / 255.0
     return np.expand_dims(image_array, axis=0), image_path
 
@@ -175,6 +182,7 @@ def predict_species(image_batch, edibility_label: str | None = None) -> dict | N
 
     species_model, species_info_map = assets
     raw_probs = species_model.predict(image_batch, verbose=0)[0]
+    raw_max_species = float(np.max(raw_probs))
     probs = calibrate_probabilities(raw_probs)
 
     candidate_indices = list(range(len(probs)))
@@ -212,25 +220,82 @@ def predict_species(image_batch, edibility_label: str | None = None) -> dict | N
         "closest_species":            info["scientific_name"],
         "species_confidence":         round(species_conf, 4),
         "species_confidence_percent": round(species_conf * 100, 2),
+        "raw_max_species_prob":       round(raw_max_species, 4),
         "species_threshold":          SPECIES_THRESHOLD,
         "species_raw_score":          [round(float(p), 6) for p in probs],
     }
 
 
-def predict_mushroom(image_path):
-    image_batch, resolved_image_path = preprocess_image(image_path)
+def predict_mushroom(image_path, detect_only: bool = False):
+    # Use aspect-preserving center crop as primary view so 16:9 camera frames aren't distorted
+    image_batch, resolved_image_path = preprocess_image(image_path, method="fit")
     model, labels_map = load_assets()
 
     raw_predictions = model.predict(image_batch, verbose=0)[0]  # shape (3,) — softmax probs
+    raw_max_prob = float(np.max(raw_predictions))
     predictions = calibrate_probabilities(raw_predictions)
     predicted_index = int(np.argmax(predictions))
     stage1_confidence = float(predictions[predicted_index])
-    label = labels_map.get(predicted_index, "unknown")
-    is_mushroom = label.lower() != "not_mushroom"
+    raw_label = labels_map.get(predicted_index, "unknown")
+
+    # Resolve class indices
+    not_mush_idx = None
+    edible_idx = None
+    poison_idx = None
+    for idx, name in labels_map.items():
+        n = str(name).lower()
+        if n == "not_mushroom":
+            not_mush_idx = idx
+        elif n == "edible":
+            edible_idx = idx
+        elif n == "poisonous":
+            poison_idx = idx
+
+    not_mush_prob = float(raw_predictions[not_mush_idx]) if not_mush_idx is not None else 0.0
+    mush_prob = 1.0 - not_mush_prob
+
+    # --- Strict OOD & Subject Verification Gate ---
+    # Prevents non-mushroom objects (e.g., durian fruit, computer mouse, desk objects)
+    # from passing as "subject is mushroom" when Stage-1 probabilities are split or weak.
+    if raw_label.lower() == "not_mushroom":
+        is_mushroom = False
+        label = "not_mushroom"
+    elif (
+        mush_prob < THRESHOLD
+        or raw_max_prob < OOD_MIN_MAX_THRESHOLD
+        or not_mush_prob >= 0.25
+    ):
+        is_mushroom = False
+        label = "not_mushroom"
+    else:
+        is_mushroom = True
+        label = raw_label
 
     species_result = None
     if is_mushroom:
         species_result = predict_species(image_batch, edibility_label=label.lower())
+        # Secondary OOD check: if Stage-1 is not overwhelmingly confident (< 0.88) AND
+        # Stage-2 species classifier sees no recognizable mushroom features (raw max < 0.50),
+        # reject the frame as a non-mushroom object (e.g., durian or mouse device).
+        if species_result is not None:
+            raw_sp_max = float(species_result.get("raw_max_species_prob", 1.0))
+            if raw_max_prob < 0.88 and raw_sp_max < 0.50:
+                is_mushroom = False
+                label = "not_mushroom"
+                species_result = None
+
+    if detect_only:
+        return {
+            "ok":           True,
+            "image":        str(resolved_image_path),
+            "label":        label,
+            "is_mushroom":  is_mushroom,
+            "status_label": "subject is mushroom" if is_mushroom else "subject not mushroom",
+            "confidence":   round(stage1_confidence, 4),
+            "confidence_percent": round(stage1_confidence * 100, 2),
+            "raw_score":    [round(float(p), 6) for p in predictions],
+            "threshold":    THRESHOLD,
+        }
 
     # Combine Stage-1 (edibility) and Stage-2 (species) confidence when species model is active
     if is_mushroom and species_result is not None:
