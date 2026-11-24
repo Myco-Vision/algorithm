@@ -1,40 +1,68 @@
 {
   "0": {
+    "key": "Amanita_virosa",
+    "scientific_name": "Amanita virosa",
+    "common_name": "Destroying Angel",
+    "display_name": "Amanita virosa",
+    "classification": "poisonous"
+  },
+  "1": {
+    "key": "Auricularia",
+    "scientific_name": "Auricularia",
+    "common_name": "Talingang Daga",
+    "display_name": "Auricularia",
+    "classification": "edible"
+  },
+  "2": {
     "key": "Ganoderma",
     "scientific_name": "Ganoderma",
     "common_name": "Reishi / Artist's Conk",
     "display_name": "Ganoderma",
     "classification": "poisonous"
   },
-  "1": {
+  "3": {
     "key": "Gymnopilus",
     "scientific_name": "Gymnopilus",
     "common_name": "Rustgill",
     "display_name": "Gymnopilus",
     "classification": "poisonous"
   },
-  "2": {
+  "4": {
     "key": "Hypsizygus_tessellatus",
     "scientific_name": "Hypsizygus tessellatus",
     "common_name": "Buna Shimeji",
     "display_name": "Hypsizygus tessellatus",
     "classification": "edible"
   },
-  "3": {
+  "5": {
+    "key": "Leucocoprinus_birnbaumii",
+    "scientific_name": "Leucocoprinus birnbaumii",
+    "common_name": "Flowerpot Parasol",
+    "display_name": "Leucocoprinus birnbaumii",
+    "classification": "poisonous"
+  },
+  "6": {
     "key": "Pleurotus_ostreatus",
     "scientific_name": "Pleurotus ostreatus",
     "common_name": "Oyster Mushroom",
     "display_name": "Pleurotus ostreatus",
     "classification": "edible"
   },
-  "4": {
+  "7": {
     "key": "Pleurotus_pulmonarius",
     "scientific_name": "Pleurotus pulmonarius",
     "common_name": "Phoenix Oyster",
     "display_name": "Pleurotus pulmonarius",
     "classification": "edible"
   },
-  "5": {
+  "8": {
+    "key": "Termitomyces",
+    "scientific_name": "Termitomyces",
+    "common_name": "Mamuno",
+    "display_name": "Termitomyces",
+    "classification": "edible"
+  },
+  "9": {
     "key": "Trametes",
     "scientific_name": "Trametes",
     "common_name": "Turkey Tail Bracket",
